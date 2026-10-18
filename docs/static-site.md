@@ -158,6 +158,9 @@ explains why:
   (`restartPolicy: Never`, so every retry is a new pod admitted afresh) that
   runs as the site's ServiceAccount and asks STS who it is. It passes only
   once a pod admitted now has the identity; then the Deployment is created.
+  With `registry.ack.accountId` set (the key `static-site-infra` already takes,
+  so one set of values feeds both) it also proves the pod runs in that AWS
+  account, not only under the role.
 - A hook runs before anything else in its release, so the ServiceAccount
   cannot be the application release's. It is `static-site-infra`'s, rendered
   after the association.
@@ -202,19 +205,21 @@ fullnameOverride: ""
 ```
 
 ```yaml
-# static-site (the same registry.ack keys are accepted and ignored but for enabled)
+# static-site (the same registry.ack keys are accepted and ignored but for enabled and accountId)
 registry:
   auth: ecr
   ack:
     enabled: true
+    # accountId: "<account-id>"                # optional: the hook also checks the pod runs in this
+    #                                          # AWS account (-expect-account; needs identity-check >= 0.34.0)
 serviceAccount:
   name: ""
 images:
   identity-check:                              # the hook's image, pinned by digest
     registry: ghcr.io
     repository: truvity/k8s/identity-check
-    tag: 0.31.1
-    digest: sha256:d2c62885b97f03fed283478f57480ad2c7ebf2b2d7eb43f1cbc2482866e5692d
+    tag: 0.34.0
+    digest: sha256:9fc40a066f5455eb807f0826f7083b0ead46924956af3c8ed5e2c381233d1a38
 ```
 
 `static-site-infra` must be installed with the **same release name** as

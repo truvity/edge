@@ -20,8 +20,8 @@ images:
   identity-check:
     registry: ghcr.io
     repository: truvity/k8s/identity-check
-    tag: 0.31.1
-    digest: sha256:d2c62885b97f03fed283478f57480ad2c7ebf2b2d7eb43f1cbc2482866e5692d
+    tag: 0.34.0
+    digest: sha256:9fc40a066f5455eb807f0826f7083b0ead46924956af3c8ed5e2c381233d1a38
 
 # Secrets for pulling the SERVER image (not the site artifact).
 imagePullSecrets: []
@@ -70,9 +70,13 @@ registry:
   # check hook, which fails until a pod admitted now has the identity. Install
   # static-site-infra first. The other keys of ack are static-site-infra's
   # (the same keys, so one set of values feeds both); this chart reads
-  # `enabled` alone. IRSA (non-EKS) stays serviceAccount.annotations.
+  # `enabled` and `accountId` alone. IRSA (non-EKS) stays serviceAccount.annotations.
   ack:
     enabled: false
+    # Optional, also read here: the AWS account the identity check hook expects
+    # the pod to run in (`-expect-account`; 12 digits, quoted). Unset, the hook
+    # checks the role alone. In static-site-infra it pins the trust (with region).
+    accountId: ""
     # Read by static-site-infra, ignored here:
     # EKS cluster the association is in. Required when enabled.
     clusterName: ""
@@ -81,8 +85,8 @@ registry:
     repositoryArns: []
     # Name of the IAM Role and Policy. Default <clusterName>-<namespace>-<release>.
     rolePrefix: ""
-    # Optional: pin the trust to the cluster's account and ARN (both needed).
-    accountId: ""
+    # Optional: pin the trust to the cluster's account and ARN (both needed;
+    # accountId is declared above).
     region: ""
     # Tags on the Role. `cluster` is always set; put `project: <name>` here:
     # the ACK project role confines on aws:ResourceTag/project.

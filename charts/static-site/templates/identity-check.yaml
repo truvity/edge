@@ -8,6 +8,11 @@ which static-site-infra renders and which must already exist. Rendered exactly
 when the identity is managed (registry.auth=ecr and registry.ack.enabled);
 there is no switch.
 
+With registry.ack.accountId set (12 digits, the schema refuses anything else)
+the hook also passes `-expect-account`: it fails unless the pod runs in that AWS
+account, not only under the role. Unset, no flag is passed. It needs
+images.identity-check from truvity/k8s v0.34.0 or later.
+
 The library labels the check pod from the including chart's name and
 `<component>-identity-check`, and this chart's selectors carry the chart name
 and the release only. The check is therefore given a chart name of its own
@@ -20,5 +25,7 @@ Ready while it runs. Its egress policy is static-site-infra's
 {{- $ctx := dict "Release" .Release "Values" .Values "Chart" (dict "Name" (printf "%s-identity-check" .Chart.Name) "AppVersion" .Chart.AppVersion) }}
 {{- $platform := dict "serviceAccount" (dict "name" (include "static-site.serviceAccountName" .)) }}
 ---
-{{ include "service-lib.identityCheck" (dict "context" $ctx "name" (include "static-site.name" .) "platform" $platform "cloudIdentity" true) }}
+{{- $spec := dict "context" $ctx "name" (include "static-site.name" .) "platform" $platform "cloudIdentity" true }}
+{{- with ((.Values.registry.ack).accountId) }}{{- $_ := set $spec "expectAccount" (toString .) }}{{- end }}
+{{ include "service-lib.identityCheck" $spec }}
 {{- end }}

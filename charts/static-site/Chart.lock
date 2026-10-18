@@ -1,6 +1,6 @@
 dependencies:
 - name: service-lib
   repository: oci://ghcr.io/truvity/charts
-  version: 1.51.0
-digest: sha256:dc90d7b48d6374e22df22ee729f3287e5c2831365b0e1445686608033c182f4c
-generated: "2026-10-16T02:22:14.956196139+02:00"
+  version: 1.54.0
+digest: sha256:54aaafdea132901b9a2d171950ee19ebbcf1d5804dda5fa24201ff3ce28a7859
+generated: "2026-10-18T11:48:45.819185615+02:00"
