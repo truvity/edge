@@ -68,7 +68,7 @@
         "ack": {
           "type": "object",
           "additionalProperties": false,
-          "description": "the ServiceAccount's AWS identity on EKS is static-site-infra's (the same keys); this chart reads enabled alone: with registry.auth=ecr it renders no ServiceAccount and the identity check hook",
+          "description": "the ServiceAccount's AWS identity on EKS is static-site-infra's (the same keys); this chart reads enabled and accountId: with registry.auth=ecr it renders no ServiceAccount and the identity check hook, which passes accountId (when set) as the account the pod must run in",
           "properties": {
             "enabled": { "type": "boolean" },
             "clusterName": { "type": "string", "pattern": "^([a-zA-Z0-9][a-zA-Z0-9_-]{0,99})?$" },

@@ -5,6 +5,12 @@ heading here is a patch cut automatically for dependency bumps alone; its
 GitHub Release lists them. The chart and the Go module are released
 together at every version.
 
+## v4.1.0
+
+### Changed
+
+- **`static-site`: the identity check hook also proves the AWS account** (owner decision D673 a). With `registry.ack.accountId` set (12 digits, quoted; the key `static-site-infra` already takes, so one set of values feeds both) the hook passes `-expect-account`: it fails unless the pod runs in that account, not only under the role. Unset, nothing changes: no flag is passed. From `service-lib` 1.54.0 and `identity-check` 0.34.0 (`-expect-account` needs 0.34.0 or later; the image default and its digest move). The chart now reads `registry.ack.accountId` besides `enabled`; a values file that pins `images.identity-check` below 0.34.0 and sets `accountId` fails every retry of the hook.
+
 ## v4.0.0
 
 ### Breaking

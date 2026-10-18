@@ -17,7 +17,7 @@ appVersion: 0.0.0
 # packages with it.
 dependencies:
   - name: service-lib
-    version: 1.51.0
+    version: 1.54.0
     repository: oci://ghcr.io/truvity/charts
 home: https://github.com/truvity/edge
 sources:
