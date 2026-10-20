@@ -27,6 +27,8 @@ jobs:
       policy-conformance: true
       policy-conformance-strict: true
       recipes: '["build", "lint", "test", "leak-canary"]'
+      # 26.04 hosted runners kill heavy Go jobs, so drop this pin once 26.04 is stable.
+      runner: ubuntu-24.04
 
   # Stable name for branch protection: the matrix reports as
   # "recipes / lint" and so on, so a required context called "check"

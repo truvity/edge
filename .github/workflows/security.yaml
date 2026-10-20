@@ -16,3 +16,5 @@ jobs:
     uses: truvity/ci-workflows/.github/workflows/check.yaml@d4350d573f67de8f7a145a4de94c392c6b43fd8c # v5.0.0
     with:
       recipes: '["vuln"]'
+      # 26.04 hosted runners kill heavy Go jobs, so drop this pin once 26.04 is stable.
+      runner: ubuntu-24.04
