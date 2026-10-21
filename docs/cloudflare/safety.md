@@ -9,7 +9,8 @@ before a single resource is registered.
 
 ## The chart: refused at render time
 
-`charts/cloudflared` has no render-time `fail`. Every refusal is its
+`charts/cloudflared` has one render-time `required` (an enabled budget
+with neither bound). Every other refusal is its
 `values.schema.json`, which Helm checks on every `lint`, `template`,
 `install` and `upgrade`, and so does a GitOps controller that renders the
 chart. Each rule has a fixture under `tests/invalid/cloudflared/`, and
@@ -20,7 +21,9 @@ renders the chart with `--set bogusKey=1` and fails if that renders.
 | --- | --- | --- |
 | `unknown-key.yaml` | `replicaCont: 3` next to `replicaCount` | a typo read as "use the default": the release runs the default replica count and the values file says otherwise |
 | `image-unknown-key.yaml` | `image.version` instead of `image.tag` | the pinned image running while the values file names another version |
-| `pdb-unknown-key.yaml` | `podDisruptionBudget.maxUnavailable` | a budget the chart does not render: it takes `minAvailable` only, so the key would be dropped and the budget would be `minAvailable: 1` |
+| `pdb-unknown-key.yaml` | `podDisruptionBudget.unhealthyPodEvictionPolicy` | a budget field the chart does not render: the key would be dropped and the budget would evict as if it were unset |
+| `pdb-no-budget.yaml` | `podDisruptionBudget.maxUnavailable: null` with no `minAvailable` | an enabled budget with neither bound, which the API server rejects; the render fails with a `required` error instead |
+| `zone-spread-unknown.yaml` | `zoneSpread: Required` | a `whenUnsatisfiable` value the API server rejects after the rest of the release has applied |
 | `service-account-unknown-key.yaml` | `serviceAccount.automount` | a setting the chart has no field for, silently ignored |
 | `pull-policy-invalid.yaml` | `image.pullPolicy: Sometimes` | a Deployment the API server rejects after the rest of the release has applied |
 | `replicas-negative.yaml` | `replicaCount: -1` | the same, for the replica count |

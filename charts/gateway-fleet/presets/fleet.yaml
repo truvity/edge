@@ -4,7 +4,8 @@
 #   helm template gateway-fleet gateway-fleet -f presets/fleet.yaml -f mine.yaml
 #
 # What an estate still states itself: tolerations and node selection (they
-# follow its own taints), replicas and the services.
+# follow its own taints) and the services. Replicas (3) and the budget
+# (maxUnavailable 1) are the chart's defaults.
 proxyDefaults:
   # Run ext_authz before jwt_authn. An access proxy (HTTP ext_authz) injects the
   # access token as a header that the JWT filter then validates. Fleet-wide but
@@ -34,6 +35,7 @@ proxyDefaults:
       sec-fetch-mode: "%REQ(SEC-FETCH-MODE)%"
       cf-ray: "%REQ(CF-RAY)%"
   pod:
-    # Both proxies in one zone means one zone loss takes the gateway down.
-    # DoNotSchedule: the autoscaler scales another zone's group up instead.
+    # One proxy per zone (three replicas, three zones): two proxies in one
+    # zone means one zone loss takes two of them. DoNotSchedule: the
+    # autoscaler adds a node in the zone that lacks a proxy instead.
     zoneSpread: DoNotSchedule

@@ -4,5 +4,6 @@
 # never claim each other's pods.
 secretName: cloudflared-partner-token
 caSecretName: cloudflared-partner-origin-ca
+# minAvailable is rendered instead of the default maxUnavailable.
 podDisruptionBudget:
-  enabled: true
+  minAvailable: 1

@@ -7,15 +7,17 @@ nodeSelector:
 tolerations:
   - key: arch
     operator: Exists
+# A constraint of the caller's own comes first, then the chart's zone spread.
 topologySpreadConstraints:
   - maxSkew: 1
-    topologyKey: topology.kubernetes.io/zone
-    whenUnsatisfiable: DoNotSchedule
+    topologyKey: kubernetes.io/hostname
+    whenUnsatisfiable: ScheduleAnyway
     labelSelector:
       matchLabels:
         app.kubernetes.io/name: cloudflared
+zoneSpread: DoNotSchedule
 podDisruptionBudget:
-  enabled: true
+  maxUnavailable: 2
 podAnnotations:
   example.com/checksum: abc
 priorityClassName: system-cluster-critical

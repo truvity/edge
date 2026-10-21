@@ -1,10 +1,10 @@
 # cloudflared — the in-cluster end of a Cloudflare Tunnel.
 #
-# Scope: Deployment + ServiceAccount, nothing else. The tunnel itself, its
-# ingress rules and the token are the control plane's business (the
-# Cloudflare dashboard, or the Pulumi component in this repository); the
-# Secret holding the token is created by whatever owns secrets in your
-# estate (External Secrets, SOPS, kubectl). NetworkPolicies are yours too:
+# Scope: Deployment, ServiceAccount and PodDisruptionBudget, nothing else.
+# The tunnel itself, its ingress rules and the token are the control
+# plane's business (the Cloudflare dashboard, or the Pulumi component in
+# this repository); the Secret holding the token is created by whatever
+# owns secrets in your estate (External Secrets, SOPS, kubectl). NetworkPolicies are yours too:
 # the pod only needs egress to Cloudflare's edge and to the origins the
 # tunnel routes to.
 #
@@ -19,7 +19,12 @@
 nameOverride: ""
 fullnameOverride: ""
 
-replicaCount: 2
+# Every replica is one connector of the same tunnel: Cloudflare sends a
+# request to the closest connected replica and retries another when that
+# one fails. Three is one per zone in a three-zone cluster, so losing a
+# node or a zone leaves two. Cloudflare allows 25 active replicas per
+# tunnel; each opens four connections to the edge.
+replicaCount: 3
 
 image:
   repository: cloudflare/cloudflared
@@ -54,12 +59,25 @@ priorityClassName: ""
 nodeSelector: {}
 tolerations: []
 affinity: {}
+# Passed through, before the zoneSpread constraint.
 topologySpreadConstraints: []
+# One replica per zone, selected by this release's own pod labels:
+#   ""              no constraint of the chart's own (the default: a cluster
+#                   without zone labels would refuse every pod otherwise)
+#   DoNotSchedule   a hard rule; a node autoscaler adds a node in the zone
+#                   that lacks a replica instead of stacking two in one
+#   ScheduleAnyway  a preference the scheduler may break
+# The constraint carries matchLabelKeys [pod-template-hash], so a rolling
+# update spreads the new ReplicaSet's pods by themselves.
+zoneSpread: ""
 
-# A PDB keeps the tunnel up across node drains when replicaCount > 1.
+# A PDB keeps the tunnel up across node drains and node replacement.
+# maxUnavailable lets one replica go at a time, whatever replicaCount is.
+# minAvailable, when set, is rendered instead of maxUnavailable.
 podDisruptionBudget:
-  enabled: false
-  minAvailable: 1
+  enabled: true
+  maxUnavailable: 1
+  minAvailable: null
 
 resources:
   requests:

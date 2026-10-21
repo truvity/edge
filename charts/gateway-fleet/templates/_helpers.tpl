@@ -32,9 +32,10 @@ enabled: true
 name: ""
 annotations: {}
 filterOrder: []
-replicas: 2
+replicas: 3
 podDisruptionBudget:
-  minAvailable: 1
+  maxUnavailable: 1
+  minAvailable: null
 passthrough: false
 pod:
   tolerations: []
@@ -140,8 +141,15 @@ class has exactly one proxy, so the flag has no meaning per exposure.
 `selector` is the label set that selects this proxy's pods, for the zone
 spread constraint (`pod.zoneSpread`): one pod of the fleet per zone, as far as
 the autoscaler can provide, with `DoNotSchedule` making it a hard rule (the
-autoscaler then adds a zone's node group instead of stacking both proxies in
-one zone) and `ScheduleAnyway` a soft one.
+autoscaler then adds a node in the zone that lacks a proxy instead of stacking
+two in one zone) and `ScheduleAnyway` a soft one. The constraint carries
+`matchLabelKeys: [pod-template-hash]`, so a rolling update spreads the new
+ReplicaSet's pods by themselves and ends one per zone.
+
+The PodDisruptionBudget is `maxUnavailable` (one proxy at a time, whatever the
+replica count), unless `minAvailable` is set: then `minAvailable` alone, and
+`minAvailable: 0` renders no budget at all. EnvoyProxy takes one of the two,
+never both.
 */}}
 {{- define "gateway.proxy.spec" -}}
 {{- $p := .proxy -}}
@@ -170,13 +178,19 @@ one zone) and `ScheduleAnyway` a soft one.
       "maxSkew" 1
       "topologyKey" "topology.kubernetes.io/zone"
       "whenUnsatisfiable" $p.pod.zoneSpread
-      "labelSelector" (dict "matchLabels" .selector)) -}}
+      "labelSelector" (dict "matchLabels" .selector)
+      "matchLabelKeys" (list "pod-template-hash")) -}}
 {{- end -}}
 {{- with $spread }}{{- $_ := set $pod "topologySpreadConstraints" . }}{{- end -}}
 {{- $deploy := dict "replicas" $p.replicas -}}
 {{- with $pod }}{{- $_ := set $deploy "pod" . }}{{- end -}}
 {{- $k8s := dict "envoyService" $svc "envoyDeployment" $deploy -}}
-{{- if $p.podDisruptionBudget.minAvailable }}{{- $_ := set $k8s "envoyPDB" (dict "minAvailable" $p.podDisruptionBudget.minAvailable) }}{{- end -}}
+{{- $pdb := $p.podDisruptionBudget -}}
+{{- if not (kindIs "invalid" $pdb.minAvailable) -}}
+{{- if $pdb.minAvailable }}{{- $_ := set $k8s "envoyPDB" (dict "minAvailable" $pdb.minAvailable) }}{{- end -}}
+{{- else if $pdb.maxUnavailable -}}
+{{- $_ := set $k8s "envoyPDB" (dict "maxUnavailable" $pdb.maxUnavailable) -}}
+{{- end -}}
 {{- if $p.useListenerPortAsContainerPort }}{{- $_ := set $k8s "useListenerPortAsContainerPort" true }}{{- end -}}
 {{- $s := dict "provider" (dict "type" "Kubernetes" "kubernetes" $k8s) -}}
 {{- if .renderMerge }}{{- $_ := set $s "mergeGateways" .merge }}{{- end -}}

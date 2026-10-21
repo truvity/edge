@@ -325,8 +325,9 @@ secretName: cloudflared-platform-token   # key tunnel-token (secretKey)
 # The CA that signed the origin's certificate, as a Secret key ca.pem;
 # the ingress rules above point caPool at the mounted file.
 caSecretName: cloudflared-platform-origin-ca
-podDisruptionBudget:
-  enabled: true
+# Three replicas (the default), one per zone; the PodDisruptionBudget
+# (maxUnavailable: 1) is on by default.
+zoneSpread: DoNotSchedule
 ```
 
 The second account is a second release, `cloudflared-partner`, with its

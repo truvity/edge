@@ -1,0 +1,3 @@
+# zoneSpread is a whenUnsatisfiable value; anything else would reach the
+# Deployment and be refused there, on the cluster.
+zoneSpread: Required

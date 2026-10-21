@@ -36,7 +36,16 @@ spec:
       {{- with .Values.affinity }}
       affinity: {{ toYaml . | nindent 8 }}
       {{- end }}
-      {{- with .Values.topologySpreadConstraints }}
+      {{- $spread := .Values.topologySpreadConstraints | default list }}
+      {{- with .Values.zoneSpread }}
+      {{- $spread = append $spread (dict
+            "maxSkew" 1
+            "topologyKey" "topology.kubernetes.io/zone"
+            "whenUnsatisfiable" .
+            "labelSelector" (dict "matchLabels" (include "cloudflared.selectorLabels" $ | fromYaml))
+            "matchLabelKeys" (list "pod-template-hash")) }}
+      {{- end }}
+      {{- with $spread }}
       topologySpreadConstraints: {{ toYaml . | nindent 8 }}
       {{- end }}
       securityContext:
