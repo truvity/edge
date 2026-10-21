@@ -39,6 +39,8 @@ documents. Read the half you adopt.
 - [gateway/safety.md](gateway/safety.md): every render-time refusal and the
   failure it prevents; the traps
 - [gateway/reference.md](gateway/reference.md): every value of every chart
+- [gateway/host-routing.md](gateway/host-routing.md): the host-routing convention,
+  one origin per hostname and paths composed in Envoy
 - [gateway/doctrine.md](gateway/doctrine.md): the ownership contract
 - [gateway/CHANGELOG-history.md](gateway/CHANGELOG-history.md): the changelog
   of `truvity/gateway` up to its v1.19.0, before it was folded in here
