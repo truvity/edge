@@ -55,16 +55,20 @@ classes: {}
 #      name: ""                     # default: <class>-config
 #      annotations: {}
 #      filterOrder: []              # verbatim EnvoyProxy.spec.filterOrder
-#      replicas: 2
+#      replicas: 3                  # one per zone in a three-zone cluster
 #      podDisruptionBudget:
-#        minAvailable: 1            # 0 or null: no PDB
+#        maxUnavailable: 1          # one proxy at a time; 0 or null: no PDB
+#        minAvailable: null         # set: rendered INSTEAD of maxUnavailable;
+#                                   # 0: no PDB
 #      pod:
 #        tolerations: []
 #        nodeSelector: {}
 #        affinity: {}
 #        topologySpreadConstraints: []
 #        # DoNotSchedule | ScheduleAnyway: one proxy per zone, selected by the
-#        # proxy's own pod labels. Empty renders no constraint of its own.
+#        # proxy's own pod labels plus matchLabelKeys [pod-template-hash], so
+#        # a rolling update spreads the new pods by themselves. Empty renders
+#        # no constraint of its own.
 #        zoneSpread: ""
 #      # A fleet that carries TLS passthrough entries: fills the graceful-drain
 #      # defaults (10s / 30s / 60s) wherever `shutdown` leaves them empty.

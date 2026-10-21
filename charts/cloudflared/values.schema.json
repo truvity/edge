@@ -39,12 +39,14 @@
     "tolerations": { "type": "array", "items": { "type": "object" } },
     "affinity": { "type": "object" },
     "topologySpreadConstraints": { "type": "array", "items": { "type": "object" } },
+    "zoneSpread": { "type": "string", "enum": ["", "DoNotSchedule", "ScheduleAnyway"] },
     "podDisruptionBudget": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
         "enabled": { "type": "boolean" },
-        "minAvailable": { "type": ["integer", "string"] }
+        "maxUnavailable": { "type": ["integer", "string", "null"] },
+        "minAvailable": { "type": ["integer", "string", "null"] }
       }
     },
     "resources": { "type": "object" }

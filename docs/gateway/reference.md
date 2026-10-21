@@ -104,9 +104,11 @@ VictoriaMetrics operator's conversion should not have to.
 | `proxy.name` | `<class>-config` | the EnvoyProxy's name |
 | `proxy.annotations` | `{}` | |
 | `proxy.filterOrder` | `[]` | verbatim `EnvoyProxy.spec.filterOrder` |
-| `proxy.replicas` | `2` | |
-| `proxy.podDisruptionBudget.minAvailable` | `1` | `0` or `null`: no PodDisruptionBudget |
+| `proxy.replicas` | `3` | one per zone in a three-zone cluster, with `pod.zoneSpread` |
+| `proxy.podDisruptionBudget.maxUnavailable` | `1` | one proxy at a time, whatever the replica count; `0` or `null`: no PodDisruptionBudget |
+| `proxy.podDisruptionBudget.minAvailable` | `null` | set: rendered instead of `maxUnavailable` (EnvoyProxy takes one of the two); `0`: no PodDisruptionBudget |
 | `proxy.pod.tolerations`, `.nodeSelector`, `.affinity`, `.topologySpreadConstraints` | empty | scheduling is the estate's |
+| `proxy.pod.zoneSpread` | `""` | `DoNotSchedule` or `ScheduleAnyway`: one proxy per zone (`maxSkew: 1` on `topology.kubernetes.io/zone`), selected by the proxy's own pod labels and `matchLabelKeys: [pod-template-hash]`, so a rolling update spreads the new pods by themselves; `presets/fleet.yaml` sets `DoNotSchedule` |
 | `proxy.service.name` | `gateway-<class>` | |
 | `proxy.service.type` | `ClusterIP` | |
 | `proxy.service.clusterIP` | `""` | a pinned IPv4 address, or `None` for headless; reaches the Service through the controller's patch hook |

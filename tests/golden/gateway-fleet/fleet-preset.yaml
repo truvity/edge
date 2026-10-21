@@ -121,12 +121,14 @@ spec:
               matchLabels:
                 app.kubernetes.io/name: envoy
                 gateway.envoyproxy.io/owning-gatewayclass: internal
+            matchLabelKeys:
+            - pod-template-hash
             maxSkew: 1
             topologyKey: topology.kubernetes.io/zone
             whenUnsatisfiable: DoNotSchedule
-        replicas: 2
+        replicas: 3
       envoyPDB:
-        minAvailable: 1
+        maxUnavailable: 1
       envoyService:
         name: gateway-internal
         type: ClusterIP

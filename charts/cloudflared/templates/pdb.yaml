@@ -7,7 +7,11 @@ metadata:
   labels:
     {{- include "cloudflared.labels" . | nindent 4 }}
 spec:
+  {{- if not (kindIs "invalid" .Values.podDisruptionBudget.minAvailable) }}
   minAvailable: {{ .Values.podDisruptionBudget.minAvailable }}
+  {{- else }}
+  maxUnavailable: {{ required "podDisruptionBudget: set maxUnavailable or minAvailable, or enabled: false" .Values.podDisruptionBudget.maxUnavailable }}
+  {{- end }}
   selector:
     matchLabels:
       {{- include "cloudflared.selectorLabels" . | nindent 6 }}

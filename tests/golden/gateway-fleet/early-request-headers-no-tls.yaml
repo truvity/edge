@@ -82,9 +82,9 @@ spec:
   provider:
     kubernetes:
       envoyDeployment:
-        replicas: 2
+        replicas: 3
       envoyPDB:
-        minAvailable: 1
+        maxUnavailable: 1
       envoyService:
         name: gateway-private
         type: ClusterIP
@@ -101,9 +101,9 @@ spec:
   provider:
     kubernetes:
       envoyDeployment:
-        replicas: 2
+        replicas: 3
       envoyPDB:
-        minAvailable: 1
+        maxUnavailable: 1
       envoyService:
         name: gateway-public
         type: ClusterIP

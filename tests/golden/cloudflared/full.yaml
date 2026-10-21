@@ -12,7 +12,7 @@ metadata:
     app.kubernetes.io/version: "0.0.0"
     app.kubernetes.io/managed-by: Helm
 spec:
-  minAvailable: 1
+  maxUnavailable: 2
   selector:
     matchLabels:
       app.kubernetes.io/name: cloudflared
@@ -49,7 +49,7 @@ metadata:
     app.kubernetes.io/version: "0.0.0"
     app.kubernetes.io/managed-by: Helm
 spec:
-  replicas: 2
+  replicas: 3
   selector:
     matchLabels:
       app.kubernetes.io/name: cloudflared
@@ -76,6 +76,16 @@ spec:
         - labelSelector:
             matchLabels:
               app.kubernetes.io/name: cloudflared
+          maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+        - labelSelector:
+            matchLabels:
+              app.kubernetes.io/component: tunnel
+              app.kubernetes.io/instance: cloudflared
+              app.kubernetes.io/name: cloudflared
+          matchLabelKeys:
+          - pod-template-hash
           maxSkew: 1
           topologyKey: topology.kubernetes.io/zone
           whenUnsatisfiable: DoNotSchedule

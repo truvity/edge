@@ -188,6 +188,20 @@ the new pods are ready before the old ones go. To keep the v1.x names,
 set `fullnameOverride: cloudflared` (the ServiceAccount follows it) and
 use the procedure above, with your release name in the `helm` commands.
 
+### Three replicas and a budget by default (the release after v4.1.0)
+
+`replicaCount` defaults to `3` (was `2`) and `podDisruptionBudget` is on
+by default with `maxUnavailable: 1` (was off, `minAvailable: 1`). An
+install that sets neither gains one replica and a PodDisruptionBudget on
+the next sync; the tunnel gains one connector, which is harmless. To keep
+the old shape, set `replicaCount: 2` and `podDisruptionBudget.enabled:
+false`. A values file with `podDisruptionBudget.minAvailable` keeps that
+budget: `minAvailable` is rendered instead of `maxUnavailable`.
+
+`zoneSpread: DoNotSchedule` (new, off by default) spreads the replicas one
+per zone. Leave it off on a cluster whose nodes carry no
+`topology.kubernetes.io/zone` label: `DoNotSchedule` refuses such nodes.
+
 ### v4: the module moves to edge/v4, and three deprecated things go
 
 v4.0.0 is a major release: the module path is `github.com/truvity/edge/v4`

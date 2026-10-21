@@ -61,9 +61,9 @@ spec:
   provider:
     kubernetes:
       envoyDeployment:
-        replicas: 2
+        replicas: 3
       envoyPDB:
-        minAvailable: 1
+        maxUnavailable: 1
       envoyService:
         annotations:
           lbipam.cilium.io/ips: 192.0.2.40
@@ -82,9 +82,9 @@ spec:
   provider:
     kubernetes:
       envoyDeployment:
-        replicas: 2
+        replicas: 3
       envoyPDB:
-        minAvailable: 1
+        maxUnavailable: 1
       envoyService:
         name: gateway-public
         type: ClusterIP

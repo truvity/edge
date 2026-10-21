@@ -11,7 +11,7 @@ authority; `Validate()` on each `Args` type returns the first problem, and
 
 The in-cluster end of a **remotely managed** tunnel: ingress rules live in
 Cloudflare (`cloudflare/tunnel` writes them), and the pod needs only the tunnel
-token. It renders a Deployment, a ServiceAccount and, when enabled, a
+token. It renders a Deployment, a ServiceAccount and, unless disabled, a
 PodDisruptionBudget. Nothing else: no Secret, no NetworkPolicy, no
 Service.
 
@@ -21,7 +21,7 @@ Service.
 | --- | --- | --- | --- |
 | `nameOverride` | `""` | string | replaces the chart name in object names and in the `app.kubernetes.io/name` label |
 | `fullnameOverride` | `""` | string | replaces the whole object name; two installs in one namespace must not share one |
-| `replicaCount` | `2` | integer, at least `0` | each replica is one connector of the same tunnel |
+| `replicaCount` | `3` | integer, at least `0` | each replica is one connector of the same tunnel: one per zone in a three-zone cluster. Cloudflare allows 25 active replicas per tunnel, each opening four connections to the edge |
 | `image.repository` | `cloudflare/cloudflared` | string, non-empty | |
 | `image.tag` | pinned in `values.yaml` | string, non-empty | Renovate bumps it; `--no-autoupdate` is always passed, so the tag is the version that runs |
 | `image.pullPolicy` | `IfNotPresent` | `Always`, `IfNotPresent` or `Never` | |
@@ -39,9 +39,11 @@ Service.
 | `nodeSelector` | `{}` | map of strings | |
 | `tolerations` | `[]` | list | passed through |
 | `affinity` | `{}` | object | passed through |
-| `topologySpreadConstraints` | `[]` | list | passed through |
-| `podDisruptionBudget.enabled` | `false` | boolean | renders a PodDisruptionBudget with the pod selector |
-| `podDisruptionBudget.minAvailable` | `1` | integer or string | a count or a percentage |
+| `topologySpreadConstraints` | `[]` | list | passed through, before the `zoneSpread` constraint |
+| `zoneSpread` | `""` | `""`, `DoNotSchedule` or `ScheduleAnyway` | one replica per zone: `maxSkew: 1` on `topology.kubernetes.io/zone`, selected by the release's pod selector and `matchLabelKeys: [pod-template-hash]` (a rolling update spreads the new pods by themselves). Empty: no constraint of the chart's own, because `DoNotSchedule` refuses every node without a zone label |
+| `podDisruptionBudget.enabled` | `true` | boolean | renders a PodDisruptionBudget with the pod selector |
+| `podDisruptionBudget.maxUnavailable` | `1` | integer, string or `null` | a count or a percentage: one replica at a time, whatever `replicaCount` is |
+| `podDisruptionBudget.minAvailable` | `null` | integer, string or `null` | set: rendered instead of `maxUnavailable` (a budget takes one of the two) |
 | `resources` | requests `cpu: 50m`, `memory: 64Mi`; limit `memory: 256Mi` | object | passed through |
 | `global` | unset | object | accepted so a parent chart's globals do not fail the schema; unused |
 

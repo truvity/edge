@@ -5,6 +5,13 @@ heading here is a patch cut automatically for dependency bumps alone; its
 GitHub Release lists them. The chart and the Go module are released
 together at every version.
 
+## Unreleased
+
+### Changed
+
+- **`gateway-fleet`: three proxies and a `maxUnavailable: 1` budget by default.** `proxy.replicas` defaults to `3` (was `2`), one per zone in a three-zone cluster with `pod.zoneSpread`, and the PodDisruptionBudget is `maxUnavailable: 1` (was `minAvailable: 1`), so a drain or a node replacement takes one proxy at a time whatever the replica count. New `proxy.podDisruptionBudget.maxUnavailable` (`0` or `null`: no budget); `minAvailable`, when set, is rendered instead of it (EnvoyProxy takes one of the two), and `minAvailable: 0` still renders no budget. The `pod.zoneSpread` constraint gains `matchLabelKeys: [pod-template-hash]`, so a rolling update spreads the new pods by themselves and ends one per zone. An install that sets none of these rolls its proxies once and gains one per class or exposure; set `replicas: 2` to keep two. See [docs/gateway/reference.md](docs/gateway/reference.md).
+- **`cloudflared`: three replicas and a PodDisruptionBudget by default.** `replicaCount` defaults to `3` (was `2`) and `podDisruptionBudget` is on by default with `maxUnavailable: 1` (was off, `minAvailable: 1`); `minAvailable`, when set, is rendered instead. Cloudflare allows 25 active replicas per tunnel. New `zoneSpread` (`DoNotSchedule` or `ScheduleAnyway`, off by default): one replica per zone, selected by the release's pod selector and `matchLabelKeys: [pod-template-hash]`. A budget with neither bound fails the render. See [docs/cloudflare/adoption.md](docs/cloudflare/adoption.md#three-replicas-and-a-budget-by-default-the-release-after-v410).
+
 ## v4.1.0
 
 ### Changed

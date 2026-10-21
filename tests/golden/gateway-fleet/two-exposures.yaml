@@ -174,9 +174,9 @@ spec:
   provider:
     kubernetes:
       envoyDeployment:
-        replicas: 2
+        replicas: 3
       envoyPDB:
-        minAvailable: 1
+        maxUnavailable: 1
       envoyService:
         annotations:
           example.com/load-balancer-scheme: internal
@@ -220,7 +220,7 @@ spec:
             whenUnsatisfiable: DoNotSchedule
         replicas: 3
       envoyPDB:
-        minAvailable: 1
+        maxUnavailable: 1
       envoyService:
         name: gateway-public
         type: ClusterIP

@@ -1,0 +1,5 @@
+# An enabled budget with neither bound: the API server would refuse the
+# PodDisruptionBudget after the rest of the release applied.
+podDisruptionBudget:
+  enabled: true
+  maxUnavailable: null
