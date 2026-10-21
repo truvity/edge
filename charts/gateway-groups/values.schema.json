@@ -152,7 +152,19 @@
             "listenerName": { "type": "string" },
             "secretName": { "type": "string" },
             "certificateName": { "type": "string" },
-            "certificate": { "$ref": "#/definitions/certificate" }
+            "certificate": { "$ref": "#/definitions/certificate" },
+            "paths": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["prefix", "namespace"],
+                "properties": {
+                  "prefix": { "type": "string", "minLength": 1 },
+                  "namespace": { "type": "string", "minLength": 1 }
+                }
+              }
+            }
           }
         }
       ]

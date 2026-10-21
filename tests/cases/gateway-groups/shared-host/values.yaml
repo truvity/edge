@@ -1,0 +1,60 @@
+# A shared host: two installations of one service on one name, one path
+# prefix each. The ListenerSet admits both namespaces by name (a listener
+# matches a host, never a path); each route stays inside its own prefix,
+# which is what the chart checks.
+defaults:
+  namespace: envoy-gateway-system
+  parent:
+    name: public
+  certificate:
+    issuerRef:
+      name: example-ca
+
+groups:
+  audit:
+    domains:
+      - host: audit.example.com
+        paths:
+          - {prefix: /first, namespace: first-audit}
+          - {prefix: /second, namespace: second-audit}
+    allowedRoutes:
+      namespaces:
+        from: Selector
+        selector:
+          matchExpressions:
+            - key: kubernetes.io/metadata.name
+              operator: In
+              values: [first-audit, second-audit]
+    routes:
+      # The prefix itself, stripped before the backend sees it.
+      - name: audit-first
+        namespace: first-audit
+        rules:
+          - matches:
+              - path: {type: PathPrefix, value: /first}
+            filters:
+              - type: URLRewrite
+                urlRewrite:
+                  path: {type: ReplacePrefixMatch, replacePrefixMatch: /}
+            backend: {name: audit-query, port: 8080}
+      # Paths below the prefix, as a prefix and as an exact match.
+      - name: audit-second
+        namespace: second-audit
+        rules:
+          - matches:
+              - path: {type: PathPrefix, value: /second/api}
+              - path: {type: Exact, value: /second/healthz}
+            backend: {name: audit-query, port: 8080}
+
+  # One installation, admitted by the plain name label.
+  single:
+    domains:
+      - host: audit.other.example.com
+        paths:
+          - {prefix: /only, namespace: only-audit}
+    allowedRoutes:
+      namespaces:
+        from: Selector
+        selector:
+          matchLabels:
+            kubernetes.io/metadata.name: only-audit

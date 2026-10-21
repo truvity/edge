@@ -31,6 +31,8 @@ refuses a fixture that renders.
 | a domain that is not a hostname | a listener the controller rejects |
 | `backendTLS` enabled with no `targetRefs` or no `validation` | a policy that re-encrypts nothing, or TLS that is never verified |
 | a `networkPolicy` with no namespaces, no ports, no source namespace or no source pod labels | an allow-everything rule written by omission |
+| on a shared host (`domains[].paths`): a malformed prefix, prefixes that nest, a namespace with two prefixes or none, a grant `allowedRoutes` does not admit by name, `paths` on some domains of a group and not others, or on a wildcard | a tenant on a shared host answering for another's prefix, or for the whole host |
+| a group route on a shared host outside its namespace's prefix, with a match that names no path, or with a `RegularExpression` path | the same, from a route the platform renders itself |
 | any unknown key (`values.schema.json`) | a typo read as "use the default" |
 
 ## Defaults chosen because the other one failed

@@ -79,6 +79,18 @@ groups: {}
 #        listenerName: legacy
 #        secretName: argocd-legacy-tls
 #
+#    # A SHARED host: `paths` grants one prefix to one namespace each, and
+#    # nothing else on the host is anybody's. The group's own `routes` on it
+#    # must stay inside their namespace's prefix (PathPrefix or Exact). Every
+#    # domain of the group is shared or none is, and allowedRoutes must admit
+#    # by name (kubernetes.io/metadata.name, or from: Same) exactly the
+#    # namespaces holding a prefix. Prefixes start with /, are lowercase, have
+#    # no trailing / or *, and never nest (/a beside /a/b is refused).
+#    #  - host: audit.example.com
+#    #    paths:
+#    #      - {prefix: /first, namespace: first-audit}
+#    #      - {prefix: /second, namespace: second-audit}
+#
 #    port: 443
 #    protocol: HTTPS
 #    certificate: {}           # merged over defaults.certificate

@@ -191,7 +191,7 @@ wins. The other keys are per group only.
 | `parent.name` | *required* | the exposure's Gateway |
 | `parent.namespace` | the group's namespace | |
 | `annotations`, `labels` | `{}` | per group only |
-| `domains` | *required*, non-empty | a hostname string, or `{host, listenerName, secretName, certificateName, certificate}` to give one domain its own names or issuer; one leading `*.` is allowed |
+| `domains` | *required*, non-empty | a hostname string, or `{host, listenerName, secretName, certificateName, certificate, paths}` to give one domain its own names or issuer, or to make it a shared host (see [shared hosts](#shared-hosts-domainspaths)); one leading `*.` is allowed |
 | `port` | `443` | |
 | `protocol` | `HTTPS` | |
 | `certificate.enabled` | `true` | |
@@ -237,6 +237,52 @@ renders none of its routes.
 
 The parent is the group's own ListenerSet, so a route cannot name a listener
 that does not exist.
+
+### Shared hosts: `domains[].paths`
+
+A domain with `paths` is a **shared host**: each entry grants one path
+prefix to one namespace, and nothing else on the host is anybody's. It is
+how several installations of one service share one name, one prefix each
+(`<host>/<installation>`), without any of them being able to answer for
+another's prefix.
+
+```yaml
+groups:
+  audit:
+    domains:
+      - host: audit.example.com
+        paths:
+          - {prefix: /first, namespace: first-audit}
+          - {prefix: /second, namespace: second-audit}
+    allowedRoutes:
+      namespaces:
+        from: Selector
+        selector:
+          matchExpressions:
+            - {key: kubernetes.io/metadata.name, operator: In, values: [first-audit, second-audit]}
+```
+
+A listener matches a host, never a path, so the ListenerSet still admits
+every granted namespace on the whole host. What holds a route to its prefix
+is what reads the grant: this chart checks the group's own `routes`, and the
+estate generates an admission policy from the same catalog
+([catalog](#catalog-go-library), `PathGrantedHosts`) for the routes it does
+not render. A domain without `paths` renders and behaves exactly as before.
+
+| Rule | Why |
+|---|---|
+| `prefix` starts with `/`, is lowercase, has non-empty segments of `[a-z0-9._~-]`, no `.` or `..` segment, no trailing `/` and no `*` | one spelling per prefix, and no shape that is a pattern rather than a prefix |
+| `prefix: /` is refused | it is the whole host; a host granted whole has no `paths` |
+| prefixes on one host are unique and never nest (`/a` beside `/a/b` is refused; `/a` beside `/ab` is not) | one request would match both, and the longer one would win in Envoy whatever the grant said |
+| a namespace holds one prefix per host | one installation, one prefix |
+| every domain of the group has `paths`, or none does | the ListenerSet admits the same namespaces on every listener, so a namespace granted a prefix on one host would be admitted on the whole of the other |
+| no `paths` on a wildcard domain | a shared host is one exact name |
+| `allowedRoutes` admits by name — `from: Same`, or a selector that is exactly `kubernetes.io/metadata.name` (one `matchLabels` entry or one `In` expression) — and every namespace it admits holds a prefix, and every prefix's namespace is admitted | a grant by a label cannot be checked against a list of namespaces; an admitted namespace with no prefix would have the whole host |
+| a group `route` on a shared host is in a namespace holding a prefix there, and every match names a `PathPrefix` or `Exact` path at or under that prefix | a match with no path is `/`, the whole host; a regular expression cannot be checked against a prefix |
+
+`URLRewrite` with `ReplacePrefixMatch: /` is how a route strips its prefix
+before the backend sees it, so one installation's backend never sees
+another's paths.
 
 ## gateway-policies
 
@@ -639,6 +685,14 @@ exposures:
             domains: [<host>, {host: <host>, listener_name: <n>, secret_name: <n>, dns_elsewhere: true, waf: off, waf_reason: <why>}]
             route_namespaces: [<namespace>]
             listener_set: true
+          <shared>:
+            # a shared host: one path prefix per namespace (see below)
+            domains:
+              - host: <host>
+                paths:
+                  - {prefix: /<installation>, namespace: <namespace>}
+            route_namespaces: [<namespace>, ...]
+            listener_set: true
 ```
 
 ```go
@@ -669,6 +723,61 @@ it by name. The private exposure is not derived: its groups attach to the
 Gateway of `PrivateEntry` and take its certificate policy. The result's
 `ListenerSetsFor` points each project at the ListenerSet that serves its
 primary hostname.
+
+### Path grants on a shared host
+
+A catalog domain with `paths` is a shared host: each entry grants one path
+prefix to one of the group's `route_namespaces`, and nothing else on the
+host is anybody's. A domain without `paths` is granted whole to every route
+namespace, exactly as before. `Load` (and `Validate`) refuse, naming the
+host and the entry:
+
+- a prefix that does not start with `/`, is `/` alone, ends in `/` or `*`,
+  is not lowercase, has an empty, `.` or `..` segment, or has a character
+  outside `[a-z0-9._~-]`;
+- two prefixes on one host that are equal or nest (`/a` and `/a/b`;
+  `/a` and `/ab` do not nest, because Gateway API's `PathPrefix` matches
+  whole segments);
+- a namespace that is not in the group's `route_namespaces`, or that holds
+  two prefixes on one host;
+- `paths` on a wildcard domain, or on some domains of a group and not on
+  others (one ListenerSet admits the same namespaces on every listener);
+- a route namespace of a shared-host group that holds no prefix on any of
+  its domains;
+- a key other than `prefix` and `namespace` in a grant.
+
+What an estate calls:
+
+```go
+// Every shared host on a cluster, sorted by host; each with its exposure,
+// group and grants (sorted by prefix). Generate the admission policy and
+// the platform routes from this.
+for _, shared := range c.PathGrantedHosts(cluster) {
+    // shared.Host, shared.Exposure, shared.Group
+    for _, grant := range shared.Paths { /* grant.Prefix, grant.Namespace */ }
+}
+
+// One host: the prefix each namespace holds. ok is false when the host is
+// granted whole or not served on that cluster.
+prefixes, ok := c.PathPrefixes(cluster, "audit.example.com") // {"first-audit": "/first", ...}
+
+catalog.PrefixCovers("/first", "/first/api") // true: the check a route's path must pass
+catalog.PrefixCovers("/first", "/firstx")    // false: segments, not characters
+```
+
+`Domain.PathGranted`, `Domain.PrefixByNamespace`, `Domain.SortedPaths`,
+`Group.PathGranted` and `Group.PathGrantedNamespaces` answer the same per
+row. `DeriveGroups` carries the grants on each `GroupValue` domain (sorted),
+for the `gateway-groups` chart's `domains[].paths`, and a platform group on
+a shared host admits every namespace holding a prefix, by name, provided
+the namespace `PlatformConsumers` names for it is one of them. A business
+group's grant is unchanged: its own namespaces, by name.
+
+The catalog states the grant; it does not enforce it. A Gateway API
+listener matches a host and never a path, so the ListenerSet admits every
+granted namespace on the whole host, and the prefix is held by the
+`gateway-groups` chart (for the routes it renders) and by the admission
+policy the estate generates from `PathGrantedHosts`.
 
 `catalog.NewPrivateEntry` derives a cluster's shared private entry from the
 object names the estate owns, its private zone, the pinned address and the

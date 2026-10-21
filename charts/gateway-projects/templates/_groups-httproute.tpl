@@ -13,9 +13,15 @@
 {{- $g := include "groups.resolve" (dict "name" $name "spec" $spec "root" $) | fromYaml }}
 {{- if and $g.enabled $g.routes }}
 {{- $hosts := list }}
+{{- $shared := dict }}
 {{- range $entry := $g.domains }}
 {{- $d := include "groups.domain.resolve" (dict "entry" $entry "group" $g) | fromYaml }}
 {{- $hosts = append $hosts $d.host }}
+{{- if $d.paths }}
+{{- $byNamespace := dict }}
+{{- range $p := $d.paths }}{{- $_ := set $byNamespace $p.namespace $p.prefix }}{{- end }}
+{{- $_ := set $shared $d.host $byNamespace }}
+{{- end }}
 {{- end }}
 {{- range $i, $route := $g.routes }}
 {{- $where := printf "groups.%s.routes[%d]" $name $i }}
@@ -46,6 +52,36 @@
 {{- end }}
 {{- if not $route.rules }}
 {{- fail (printf "%s.rules is empty — a route with no rule answers nothing" $where) }}
+{{- end }}
+{{- /* On a SHARED host (a domain with paths) the route's namespace serves
+       its one prefix and nothing else: every match must name a path, as a
+       PathPrefix or an Exact under that prefix. A match with no path is
+       `/`, the whole host; a regular expression cannot be checked against
+       a prefix at all. */}}
+{{- range $h := $hostnames }}
+{{- if hasKey $shared $h }}
+{{- $grants := get $shared $h }}
+{{- if not (hasKey $grants $route.namespace) }}
+{{- fail (printf "%s: %s is a shared host and namespace %s holds no prefix on it (granted: %s)" $where $h $route.namespace (include "groups.grants.describe" $grants)) }}
+{{- end }}
+{{- $prefix := get $grants $route.namespace }}
+{{- range $j, $rule := $route.rules }}
+{{- range $k, $m := $rule.matches }}
+{{- $mw := printf "%s.rules[%d].matches[%d]" $where $j $k }}
+{{- if not $m.path }}
+{{- fail (printf "%s has no path, which is the whole of shared host %s; namespace %s serves %s alone" $mw $h $route.namespace $prefix) }}
+{{- end }}
+{{- $type := $m.path.type | default "PathPrefix" }}
+{{- if not (has $type (list "PathPrefix" "Exact")) }}
+{{- fail (printf "%s.path.type is %s, which cannot be checked against the prefix %s granted on shared host %s; use PathPrefix or Exact" $mw $type $prefix $h) }}
+{{- end }}
+{{- $value := $m.path.value | default "/" }}
+{{- if not (include "groups.prefix.covers" (dict "prefix" $prefix "path" $value)) }}
+{{- fail (printf "%s.path.value %s is outside %s, the prefix namespace %s holds on shared host %s" $mw $value $prefix $route.namespace $h) }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- end }}
 {{- end }}
 {{- $rules := list }}
 {{- $ruleNames := dict }}

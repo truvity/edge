@@ -1,0 +1,170 @@
+---
+# Source: gateway-groups/templates/certificate.yaml
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: audit-example-com-tls
+  namespace: envoy-gateway-system
+spec:
+  secretName: audit-example-com-tls
+  dnsNames:
+    - "audit.example.com"
+  privateKey:
+    rotationPolicy: Always
+  issuerRef:
+    group: cert-manager.io
+    kind: ClusterIssuer
+    name: example-ca
+
+---
+# Source: gateway-groups/templates/certificate.yaml
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: audit-other-example-com-tls
+  namespace: envoy-gateway-system
+spec:
+  secretName: audit-other-example-com-tls
+  dnsNames:
+    - "audit.other.example.com"
+  privateKey:
+    rotationPolicy: Always
+  issuerRef:
+    group: cert-manager.io
+    kind: ClusterIssuer
+    name: example-ca
+
+---
+# Source: gateway-groups/templates/httproute.yaml
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: audit-first
+  namespace: first-audit
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: ListenerSet
+      name: audit
+      namespace: envoy-gateway-system
+  hostnames:
+    - audit.example.com
+  rules:
+    - backendRefs:
+      - group: ""
+        kind: Service
+        name: audit-query
+        port: 8080
+        weight: 1
+      filters:
+      - type: URLRewrite
+        urlRewrite:
+          path:
+            replacePrefixMatch: /
+            type: ReplacePrefixMatch
+      matches:
+      - path:
+          type: PathPrefix
+          value: /first
+
+---
+# Source: gateway-groups/templates/httproute.yaml
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: audit-second
+  namespace: second-audit
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: ListenerSet
+      name: audit
+      namespace: envoy-gateway-system
+  hostnames:
+    - audit.example.com
+  rules:
+    - backendRefs:
+      - group: ""
+        kind: Service
+        name: audit-query
+        port: 8080
+        weight: 1
+      matches:
+      - path:
+          type: PathPrefix
+          value: /second/api
+      - path:
+          type: Exact
+          value: /second/healthz
+
+---
+# Source: gateway-groups/templates/listenerset.yaml
+apiVersion: gateway.networking.k8s.io/v1
+kind: ListenerSet
+metadata:
+  name: audit
+  namespace: envoy-gateway-system
+spec:
+  parentRef:
+    group: gateway.networking.k8s.io
+    kind: Gateway
+    name: public
+    namespace: envoy-gateway-system
+  listeners:
+    - allowedRoutes:
+        kinds:
+        - group: gateway.networking.k8s.io
+          kind: HTTPRoute
+        namespaces:
+          from: Selector
+          selector:
+            matchExpressions:
+            - key: kubernetes.io/metadata.name
+              operator: In
+              values:
+              - first-audit
+              - second-audit
+      hostname: audit.example.com
+      name: audit-example-com
+      port: 443
+      protocol: HTTPS
+      tls:
+        certificateRefs:
+        - group: ""
+          kind: Secret
+          name: audit-example-com-tls
+        mode: Terminate
+
+---
+# Source: gateway-groups/templates/listenerset.yaml
+apiVersion: gateway.networking.k8s.io/v1
+kind: ListenerSet
+metadata:
+  name: single
+  namespace: envoy-gateway-system
+spec:
+  parentRef:
+    group: gateway.networking.k8s.io
+    kind: Gateway
+    name: public
+    namespace: envoy-gateway-system
+  listeners:
+    - allowedRoutes:
+        kinds:
+        - group: gateway.networking.k8s.io
+          kind: HTTPRoute
+        namespaces:
+          from: Selector
+          selector:
+            matchLabels:
+              kubernetes.io/metadata.name: only-audit
+      hostname: audit.other.example.com
+      name: audit-other-example-com
+      port: 443
+      protocol: HTTPS
+      tls:
+        certificateRefs:
+        - group: ""
+          kind: Secret
+          name: audit-other-example-com-tls
+        mode: Terminate
