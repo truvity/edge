@@ -1,0 +1,13 @@
+defaults:
+  parent: {name: public}
+  certificate: {issuerRef: {name: ca, kind: ClusterIssuer, group: cert-manager.io}}
+  allowedRoutes:
+    namespaces:
+      from: Selector
+      selector:
+        matchExpressions: [{key: kubernetes.io/metadata.name, operator: In, values: [a, b]}]
+groups:
+  g:
+    domains:
+      - host: audit.example.com
+        paths: [{prefix: /a, namespace: a}]

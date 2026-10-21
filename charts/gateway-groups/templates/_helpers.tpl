@@ -97,7 +97,7 @@ Resolve one group: chart defaults ← values.defaults ← the group's own.
 
 {{/*
 Resolve one entry of a group's `domains` into {host, listenerName,
-secretName, certificate}. A plain string is the common case; an object lets
+secretName, certificate, paths}. A plain string is the common case; an object lets
 one domain of a group carry its own names — which is what a rename needs,
 where the old and the new host live in one group through the overlap.
   {{- $d := include "groups.domain.resolve" (dict "entry" $x "group" $g) | fromYaml }}
@@ -114,7 +114,137 @@ where the old and the new host live in one group through the overlap.
   "certificateName" ($entry.certificateName | default "") -}}
 {{- $_ := set $d "certificate" (mergeOverwrite (deepCopy .group.certificate) ($entry.certificate | default dict)) -}}
 {{- if not $d.certificateName }}{{- $_ := set $d "certificateName" $d.secretName }}{{- end -}}
+{{- $_ := set $d "paths" ($entry.paths | default list) -}}
 {{- toYaml $d -}}
+{{- end -}}
+
+{{/*
+The namespaces a group's allowedRoutes admits BY NAME: {byName, names}.
+Only a grant the chart can read as a list is by name: `from: Same` (the
+group's own namespace), or a Selector that is exactly the API server's
+kubernetes.io/metadata.name label, as one matchLabels entry or one In
+expression. Any other grant admits whoever carries a label, which no path
+grant can be checked against.
+  {{- $a := include "groups.allowedRoutes.names" (dict "allowedRoutes" $r "namespace" $g.namespace) | fromYaml }}
+*/}}
+{{- define "groups.allowedRoutes.names" -}}
+{{- $ns := .allowedRoutes.namespaces | default dict -}}
+{{- $label := "kubernetes.io/metadata.name" -}}
+{{- $names := list -}}
+{{- $byName := false -}}
+{{- if eq ($ns.from | default "Same") "Same" -}}
+{{- $names = list .namespace -}}
+{{- $byName = true -}}
+{{- else if eq $ns.from "Selector" -}}
+{{- $sel := $ns.selector | default dict -}}
+{{- $labels := $sel.matchLabels | default dict -}}
+{{- $exprs := $sel.matchExpressions | default list -}}
+{{- if and (eq (len $labels) 1) (hasKey $labels $label) (eq (len $exprs) 0) -}}
+{{- $names = list (get $labels $label) -}}
+{{- $byName = true -}}
+{{- else if and (eq (len $labels) 0) (eq (len $exprs) 1) -}}
+{{- $e := index $exprs 0 -}}
+{{- if and (eq $e.key $label) (eq $e.operator "In") -}}
+{{- $names = $e.values | default list -}}
+{{- $byName = true -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- toYaml (dict "byName" $byName "names" $names) -}}
+{{- end -}}
+
+{{/* A shared host's grants as "namespace prefix, ..." for an error. */}}
+{{- define "groups.grants.describe" -}}
+{{- $out := list -}}
+{{- range $ns, $prefix := . }}{{- $out = append $out (printf "%s %s" $ns $prefix) }}{{- end -}}
+{{- join ", " $out -}}
+{{- end -}}
+
+{{/*
+Whether a path prefix covers a path, the way Gateway API's PathPrefix
+matches: element by element, so /a covers /a, /a/ and /a/b, never /ab.
+Renders "true" or nothing.
+*/}}
+{{- define "groups.prefix.covers" -}}
+{{- if or (eq .path .prefix) (hasPrefix (printf "%s/" .prefix) .path) }}true{{ end -}}
+{{- end -}}
+
+{{/*
+Hold one group's path grants to their rules. A domain with `paths` is a
+SHARED host: each entry grants one prefix to one namespace, and nothing
+else on the host is anybody's. The listener matches a host and never a
+path, so the grant is held by the routes this chart renders (httproute.yaml)
+and by an admission policy the estate generates from the same catalog.
+  {{- include "groups.paths.validate" (dict "name" $name "group" $g "domains" $resolved "allowedRoutes" $r) }}
+*/}}
+{{- define "groups.paths.validate" -}}
+{{- $name := .name -}}
+{{- $shared := 0 -}}
+{{- range $d := .domains }}{{- if $d.paths }}{{- $shared = add1 $shared }}{{- end }}{{- end -}}
+{{- if $shared -}}
+{{- if ne (int $shared) (len .domains) -}}
+{{- fail (printf "groups.%s.domains: some domains have paths and some do not; the ListenerSet admits the same namespaces on every listener, so a namespace granted a prefix on one host would be admitted on the whole of the other. Put the shared host in a group of its own" $name) -}}
+{{- end -}}
+{{- $admitted := include "groups.allowedRoutes.names" (dict "allowedRoutes" .allowedRoutes "namespace" .group.namespace) | fromYaml -}}
+{{- if not $admitted.byName -}}
+{{- fail (printf "groups.%s: a path grant names namespaces, and this group's allowedRoutes admits by a label the chart cannot read as a list of namespaces; admit by kubernetes.io/metadata.name (one matchLabels entry or one In expression) or from: Same" $name) -}}
+{{- end -}}
+{{- $holders := dict -}}
+{{- range $d := .domains -}}
+{{- $at := printf "groups.%s.domains[%s].paths" $name $d.host -}}
+{{- if hasPrefix "*." $d.host -}}
+{{- fail (printf "%s: %q is a wildcard; a path grant shares one exact host, so list that host as its own domain" $at $d.host) -}}
+{{- end -}}
+{{- $byNamespace := dict -}}
+{{- range $i, $p := $d.paths -}}
+{{- $entry := printf "%s[%d]" $at $i -}}
+{{- $prefix := $p.prefix | default "" -}}
+{{- if not $prefix -}}
+{{- fail (printf "%s.prefix is required" $entry) -}}
+{{- else if not (hasPrefix "/" $prefix) -}}
+{{- fail (printf "%s.prefix: %q does not start with /" $entry $prefix) -}}
+{{- else if eq $prefix "/" -}}
+{{- fail (printf "%s.prefix: / is the whole host; a host granted whole has no paths" $entry) -}}
+{{- else if hasSuffix "*" $prefix -}}
+{{- fail (printf "%s.prefix: %q ends in a wildcard; a prefix already covers everything below it, so write it without the *" $entry $prefix) -}}
+{{- else if hasSuffix "/" $prefix -}}
+{{- fail (printf "%s.prefix: %q ends in /; write it without the trailing slash" $entry $prefix) -}}
+{{- else if ne $prefix (lower $prefix) -}}
+{{- fail (printf "%s.prefix: %q is not lowercase; paths compare case-sensitively, so the catalog keeps one spelling" $entry $prefix) -}}
+{{- else if not (regexMatch "^(/[a-z0-9._~-]+)+$" $prefix) -}}
+{{- fail (printf "%s.prefix: %q is not a path of non-empty segments of [a-z0-9._~-] (no *, ?, #, %%, // or spaces)" $entry $prefix) -}}
+{{- else if regexMatch "/[.][.]?(/|$)" $prefix -}}
+{{- fail (printf "%s.prefix: %q has a . or .. segment, which a client normalises away" $entry $prefix) -}}
+{{- end -}}
+{{- $ns := $p.namespace | default "" -}}
+{{- if not $ns -}}
+{{- fail (printf "%s.namespace is required: the one namespace whose routes may serve %s" $entry $prefix) -}}
+{{- end -}}
+{{- if not (has $ns $admitted.names) -}}
+{{- fail (printf "%s.namespace: %q is not admitted by the group's allowedRoutes (it admits %s); the ListenerSet would not accept its routes at all" $entry $ns (join ", " $admitted.names)) -}}
+{{- end -}}
+{{- if hasKey $byNamespace $ns -}}
+{{- fail (printf "%s: namespace %q already holds %s on this host; a namespace is granted one prefix per host" $entry $ns (get $byNamespace $ns)) -}}
+{{- end -}}
+{{- $_ := set $byNamespace $ns $prefix -}}
+{{- $_ := set $holders $ns true -}}
+{{- range $j, $q := $d.paths -}}
+{{- if lt $j $i -}}
+{{- if eq $q.prefix $prefix -}}
+{{- fail (printf "%s: prefix %s is granted twice on this host (also paths[%d], to %s)" $entry $prefix $j $q.namespace) -}}
+{{- else if or (include "groups.prefix.covers" (dict "prefix" $q.prefix "path" $prefix)) (include "groups.prefix.covers" (dict "prefix" $prefix "path" $q.prefix)) -}}
+{{- fail (printf "%s: prefix %s overlaps %s (paths[%d], granted to %s); one request would match both, so prefixes on a host never nest" $entry $prefix $q.prefix $j $q.namespace) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- range $ns := $admitted.names -}}
+{{- if not (hasKey $holders $ns) -}}
+{{- fail (printf "groups.%s: allowedRoutes admits namespace %q, which holds no path on any of the group's domains, and every domain is a shared host; grant it a prefix or stop admitting it" $name $ns) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
 {{- end -}}
 
 {{/* Normalize RouteGroupKind entries so a short form renders explicitly. */}}

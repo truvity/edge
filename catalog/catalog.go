@@ -206,6 +206,13 @@ type (
 		// waf: off and refused without it, so every gap in the WAF is
 		// explained next to the name it is a gap for.
 		WAFReason string `yaml:"waf_reason,omitempty"`
+		// Paths, when present, makes the name a SHARED host: each entry
+		// grants one path prefix to one of the group's route namespaces,
+		// and nothing else on the host is anybody's. Absent, the name is
+		// granted whole to every route namespace, as before paths
+		// existed. See PathGrant for the rules and PathGrantedHosts for
+		// reading the grants back.
+		Paths []PathGrant `yaml:"paths,omitempty"`
 	}
 )
 
@@ -263,9 +270,10 @@ func (m ListenerSetMode) String() string {
 }
 
 // UnmarshalYAML takes a bare hostname or a {host, listener_name,
-// secret_name} mapping. Unknown keys are refused here by hand: the
-// loader's strict decoding does not reach into a custom unmarshaller,
-// and a misspelled secret_name would otherwise mint a second Secret.
+// secret_name, dns_elsewhere, waf, waf_reason, paths} mapping. Unknown
+// keys are refused here by hand: the loader's strict decoding does not
+// reach into a custom unmarshaller, and a misspelled secret_name would
+// otherwise mint a second Secret.
 func (d *Domain) UnmarshalYAML(node *yaml.Node) error {
 	switch node.Kind {
 	case yaml.ScalarNode:
@@ -273,9 +281,10 @@ func (d *Domain) UnmarshalYAML(node *yaml.Node) error {
 	case yaml.MappingNode:
 		for i := 0; i < len(node.Content); i += 2 {
 			switch key := node.Content[i].Value; key {
-			case "host", "listener_name", "secret_name", "dns_elsewhere", "waf", "waf_reason":
+			case "host", "listener_name", "secret_name", "dns_elsewhere", "waf", "waf_reason", "paths":
 			default:
-				return fmt.Errorf("line %d: domain field %q is not host, listener_name, secret_name, dns_elsewhere, waf or waf_reason", node.Content[i].Line, key)
+				return fmt.Errorf("line %d: domain field %q is not host, listener_name, secret_name, dns_elsewhere, waf, waf_reason or paths",
+					node.Content[i].Line, key)
 			}
 		}
 
@@ -283,7 +292,7 @@ func (d *Domain) UnmarshalYAML(node *yaml.Node) error {
 
 		return node.Decode((*plain)(d))
 	default:
-		return fmt.Errorf("line %d: a domain is a hostname or a {host, listener_name, secret_name, dns_elsewhere, waf, waf_reason} mapping", node.Line)
+		return fmt.Errorf("line %d: a domain is a hostname or a {host, listener_name, secret_name, dns_elsewhere, waf, waf_reason, paths} mapping", node.Line)
 	}
 }
 
@@ -533,7 +542,7 @@ func (g Group) validate(exposure, cluster, name string) error {
 		return fmt.Errorf("cfg/gateways: %s.route_namespaces: %q is listed twice", where, dup)
 	}
 
-	return nil
+	return g.validatePaths(where)
 }
 
 // validateDomainNames checks a domain's name overrides. They are object

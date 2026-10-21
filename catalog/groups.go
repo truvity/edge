@@ -226,6 +226,8 @@ func (c *Config) deriveGroups(in DeriveInput) ([]ExposureValue, []GroupValue, er
 					Host:         domain.Host,
 					ListenerName: domain.ListenerNameOrDefault(),
 					SecretName:   domain.SecretNameOrDefault(),
+					// The chart holds the group's own routes to these.
+					Paths: domain.SortedPaths(),
 				})
 			}
 
@@ -350,6 +352,23 @@ func routeGrant(in DeriveInput, projects map[string]Project, arrival string, gro
 			return AllowedRoutes{}, fmt.Errorf(
 				"route namespaces %v are not projects, and nothing moves a platform group named %q onto its ListenerSet (moved today: %v)",
 				platform, group.Name, slices.Sorted(maps.Keys(in.PlatformConsumers)))
+		}
+
+		// A SHARED HOST'S GROUP ADMITS EVERY NAMESPACE HOLDING A PREFIX on
+		// it, by name: one installation per namespace, each held to its
+		// prefix by what reads the path grants (the chart's routes and the
+		// admission policy), not by the listener, which matches a host and
+		// never a path. Every route namespace holds one (validatePaths), so
+		// this is exactly the group's own list. The consumer must be among
+		// them, or nothing attaches the route this group exists for.
+		if group.PathGranted() {
+			if !slices.Contains(platform, namespace) {
+				return AllowedRoutes{}, fmt.Errorf(
+					"route namespaces %v: the %s group's routes are attached from namespace %s, which holds no path on its shared host",
+					platform, group.Name, namespace)
+			}
+
+			return NamespacesGrant(platform, kinds), nil
 		}
 
 		if len(platform) != 1 || platform[0] != namespace {

@@ -22,8 +22,12 @@
 {{- end }}
 {{- include "groups.claim" (dict "registry" $objects "kind" "ListenerSet" "namespace" $g.namespace "name" $g.listenerSetName "by" $by) }}
 {{- $listeners := list }}
+{{- $resolved := list }}
 {{- range $entry := $g.domains }}
-{{- $d := include "groups.domain.resolve" (dict "entry" $entry "group" $g) | fromYaml }}
+{{- $resolved = append $resolved (include "groups.domain.resolve" (dict "entry" $entry "group" $g) | fromYaml) }}
+{{- end }}
+{{- include "groups.paths.validate" (dict "name" $name "group" $g "domains" $resolved "allowedRoutes" $allowedRoutes) }}
+{{- range $d := $resolved }}
 {{- if not $d.host }}
 {{- fail (printf "groups.%s.domains has an entry with no host" $name) }}
 {{- end }}

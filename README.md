@@ -162,6 +162,15 @@ Two consequences worth stating, because both are load-bearing:
   own namespace, so a project cannot open a listener by creating an object in
   a namespace it controls.
 
+**A shared host** grants paths, not the host: a catalog domain (and a
+`gateway-groups` domain) with `paths` gives each namespace one prefix of
+the name, so several installations of one service can share
+`<host>/<installation>` and none can answer for another's prefix. The
+listener still matches the whole host; the chart holds its own routes to
+their prefixes, and `catalog.PathGrantedHosts` is what an estate generates
+its admission policy from. A domain without `paths` is granted whole, as
+before. See [docs/gateway/reference.md](docs/gateway/reference.md#shared-hosts-domainspaths).
+
 ## Install and a worked example
 
 ### The Cloudflare half

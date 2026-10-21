@@ -5,6 +5,13 @@ heading here is a patch cut automatically for dependency bumps alone; its
 GitHub Release lists them. The chart and the Go module are released
 together at every version.
 
+## v4.3.0
+
+### Added
+
+- **Path grants on a shared host: one prefix per namespace.** A catalog domain takes an optional `paths: [{prefix, namespace}]`; with it the host is shared, and each namespace holds one prefix of it (`<host>/<installation>`), so installations of one service can share a name without any of them answering for another's prefix. A domain without `paths` loads, derives and renders exactly as before. `Load` refuses, naming the host and the entry: a prefix that does not start with `/`, is `/`, ends in `/` or `*`, is not lowercase or has an empty, `.` or `..` segment; prefixes on one host that are equal or nest (`/a` and `/a/b`); a namespace outside the group's `route_namespaces`, or holding two prefixes on one host; `paths` on a wildcard, or on some domains of a group and not others; a route namespace of a shared-host group holding no prefix. New API: `catalog.PathGrant`, `HostPaths`, `Config.PathGrantedHosts(cluster)`, `Config.PathPrefixes(cluster, host)`, `PrefixCovers`, `PrefixesOverlap`, `Domain.Paths`, `Domain.PathGranted`, `Domain.PrefixByNamespace`, `Domain.SortedPaths`, `Group.PathGranted`, `Group.PathGrantedNamespaces`. `DeriveGroups` carries the grants on each `GroupValue` domain, and a platform group on a shared host admits every namespace holding a prefix, by name, when its `PlatformConsumers` namespace is one of them. See [docs/gateway/reference.md](docs/gateway/reference.md#path-grants-on-a-shared-host).
+- **`gateway-groups` (and `gateway-projects`): `domains[].paths`.** The same grant in the chart: the same prefix rules, `allowedRoutes` must admit by name (`from: Same`, or exactly the `kubernetes.io/metadata.name` label) exactly the namespaces holding a prefix, and every group `route` on a shared host must sit in a namespace holding a prefix there, with every match a `PathPrefix` or `Exact` path at or under it. The ListenerSet and every other object render as before. See [docs/gateway/reference.md](docs/gateway/reference.md#shared-hosts-domainspaths).
+
 ## v4.2.0
 
 ### Changed
