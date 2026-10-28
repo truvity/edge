@@ -5,6 +5,12 @@ heading here is a patch cut automatically for dependency bumps alone; its
 GitHub Release lists them. The chart and the Go module are released
 together at every version.
 
+## Unreleased
+
+### Added
+
+- **`cloudflare/awsapigw`: the certificate and the truststore as standalone builders.** `NewCertificate(ctx, name, *CertificateArgs, opts...)` requests the ACM certificate for `CertificateArgs.DomainName` with DNS validation (the DNS-only Cloudflare record from `ValidationRecord`, or your own through `CreateValidationRecord`), waits for issue and returns `Certificate{Certificate, Validation, CertificateArn}`. `NewTruststore(ctx, name, *TruststoreArgs{PEM, Bucket, Tags}, opts...)` puts the PEM at `TruststoreKey` in the guarded bucket it makes or in an existing one you attest to, and returns `TruststoreResult{Bucket, Object, BucketName, URI}`. Both take the AWS provider and a parent through `opts`, so a stack with no API Gateway front door of its own (the API belongs to another tool) uses them directly; an empty `name` gives the truststore resources the unprefixed names `truststore`, `truststore-encryption`, `truststore-versioning`, `truststore-public-access`, `truststore-policy` and `truststore-pem`. `CertificateArgs` gains `DomainName` and `Tags` (`New` sets both from `Args`). `New` now builds its certificate and truststore with them: its resource names, inputs and URNs are unchanged. See [docs/cloudflare/awsapigw.md](docs/cloudflare/awsapigw.md#using-the-certificate-and-the-truststore-without-a-front-door).
+
 ## v4.3.1
 
 - Dependency updates.

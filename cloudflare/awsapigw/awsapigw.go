@@ -14,6 +14,7 @@ package awsapigw
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/pulumi/pulumi-aws/sdk/v7/go/aws/acm"
@@ -61,6 +62,11 @@ type ValidationRecord struct {
 // CertificateArgs asks for the ACM certificate to be requested, with DNS
 // validation.
 type CertificateArgs struct {
+	// DomainName is the name the certificate is for. Required by NewCertificate;
+	// New sets it from Args.DomainName.
+	DomainName string
+	// Tags are put on the certificate. New sets them from Args.Tags.
+	Tags map[string]string
 	// KeyAlgorithm is the certificate's key algorithm ("EC_prime256v1",
 	// "RSA_2048", ...). Default: the provider's.
 	KeyAlgorithm string
@@ -225,41 +231,9 @@ func (a *Args) Validate() error {
 		add("Args: set exactly one of CertificateArn and Certificate")
 	}
 	if c := a.Certificate; c != nil {
-		switch {
-		case (c.CreateValidationRecord == nil) == (c.ValidationRecord == nil):
-			add("Args.Certificate: set exactly one of CreateValidationRecord and ValidationRecord")
-		case c.ValidationRecord != nil:
-			if c.ValidationRecord.Provider == nil {
-				add("Args.Certificate.ValidationRecord.Provider is required")
-			}
-			if c.ValidationRecord.ZoneID == nil {
-				add("Args.Certificate.ValidationRecord.ZoneID is required")
-			}
-		}
+		errs = append(errs, c.validate("Args.Certificate", false)...)
 	}
-	ts := a.Truststore
-	switch {
-	case (ts.NewBucket == nil) == (ts.Existing == nil):
-		add("Args.Truststore: set exactly one of NewBucket and Existing")
-	case ts.NewBucket != nil:
-		if ts.NewBucket.Name == "" {
-			add("Args.Truststore.NewBucket.Name is required")
-		}
-		if err := a.guard(ts.NewBucket.ApplyPrincipalArns).Validate(); err != nil {
-			errs = append(errs, err)
-		}
-	default:
-		e := ts.Existing
-		if e.BucketName == "" {
-			add("Args.Truststore.Existing.BucketName is required")
-		}
-		if !e.Versioned {
-			add("Args.Truststore.Existing is not attested versioned: the domain pins the truststore's version")
-		}
-		if !e.GuardedPrefix {
-			add("Args.Truststore.Existing does not attest a guard on %q: whatever writes the bucket could replace the truststore", TruststorePrefix)
-		}
-	}
+	errs = append(errs, a.Truststore.validate("Args.Truststore", guardOf)...)
 	if d := a.DNS; d != nil {
 		if d.Provider == nil {
 			add("Args.DNS.Provider is required")
@@ -276,10 +250,6 @@ func (a *Args) Validate() error {
 		add("Args.ComponentType %q is not a type token (package:module:Type)", t)
 	}
 	return errors.Join(errs...)
-}
-
-func (a *Args) guard(principals []string) ProtectedPrefix {
-	return ProtectedPrefix{Prefix: TruststorePrefix, AllowedPrincipalArns: principals}
 }
 
 // Domain is the component. Its fields are the outputs.
@@ -333,77 +303,21 @@ func New(ctx *pulumi.Context, name string, args *Args, opts ...pulumi.ResourceOp
 	// ---- the certificate
 	certArn := a.CertificateArn
 	if c := a.Certificate; c != nil {
-		certName := name + "-certificate"
-		if c.Name != "" {
-			certName = c.Name
-		}
-		cargs := &acm.CertificateArgs{DomainName: pulumi.String(a.DomainName), ValidationMethod: pulumi.String("DNS"), Tags: tags}
-		if c.KeyAlgorithm != "" {
-			cargs.KeyAlgorithm = pulumi.String(c.KeyAlgorithm)
-		}
-		copts := []pulumi.ResourceOption{child}
-		if len(c.Aliases) > 0 {
-			copts = append(copts, pulumi.Aliases(c.Aliases))
-		}
-		cert, err := acm.NewCertificate(ctx, certName, cargs, copts...)
-		if err != nil {
-			return nil, fmt.Errorf("awsapigw certificate: %w", err)
-		}
-		rec := ValidationRecord{
-			Name: validationField(cert, func(o acm.CertificateDomainValidationOption) *string { return o.ResourceRecordName }),
-			Type: validationField(cert, func(o acm.CertificateDomainValidationOption) *string { return o.ResourceRecordType }),
-			Value: validationField(cert, func(o acm.CertificateDomainValidationOption) *string {
-				return o.ResourceRecordValue
-			}),
-		}
-		var fqdn pulumi.StringInput
-		if v := c.ValidationRecord; v != nil {
-			fqdn, err = newValidationRecord(ctx, name, v, rec, child)
-		} else {
-			fqdn, err = c.CreateValidationRecord(ctx, rec)
-		}
-		if err != nil {
-			return nil, fmt.Errorf("awsapigw certificate validation record: %w", err)
-		}
-		validationName := name + "-certificate-validation"
-		if c.ValidationName != "" {
-			validationName = c.ValidationName
-		}
-		vopts := []pulumi.ResourceOption{child}
-		if len(c.ValidationAliases) > 0 {
-			vopts = append(vopts, pulumi.Aliases(c.ValidationAliases))
-		}
-		valid, err := acm.NewCertificateValidation(ctx, validationName, &acm.CertificateValidationArgs{
-			CertificateArn:        cert.Arn,
-			ValidationRecordFqdns: pulumi.StringArray{fqdn},
-		}, vopts...)
-		if err != nil {
-			return nil, fmt.Errorf("awsapigw certificate validation: %w", err)
-		}
-		certArn = valid.CertificateArn
-	}
-
-	// ---- the truststore: one object, in a bucket of its own or an existing one
-	var bucketID, bucketName pulumi.StringInput
-	var after []pulumi.Resource
-	if e := a.Truststore.Existing; e != nil {
-		bucketID, bucketName = pulumi.String(e.BucketName), pulumi.String(e.BucketName)
-	} else {
-		b, err := newTruststoreBucket(ctx, name, &a, child)
+		ca := *c
+		ca.DomainName, ca.Tags = a.DomainName, a.Tags
+		cert, err := NewCertificate(ctx, name, &ca, child)
 		if err != nil {
 			return nil, err
 		}
-		bucketID, bucketName, after = b.bucket.ID(), b.bucket.Bucket, b.ready
+		certArn = cert.CertificateArn
 	}
-	obj, err := s3.NewBucketObjectv2(ctx, name+"-truststore-pem", &s3.BucketObjectv2Args{
-		Bucket:      bucketID,
-		Key:         pulumi.String(TruststoreKey),
-		Content:     pulumi.String(a.TruststorePEM),
-		ContentType: pulumi.String("application/x-pem-file"),
-	}, child, pulumi.DependsOn(after))
+
+	// ---- the truststore: one object, in a bucket of its own or an existing one
+	ts, err := NewTruststore(ctx, name, &TruststoreArgs{PEM: a.TruststorePEM, Bucket: a.Truststore, Tags: a.Tags}, child)
 	if err != nil {
-		return nil, fmt.Errorf("awsapigw truststore object: %w", err)
+		return nil, err
 	}
+	obj := ts.Object
 
 	// ---- the domain, which pins the version of the object it was given
 	fd := a.FrontDoor
@@ -413,7 +327,7 @@ func New(ctx *pulumi.Context, name string, args *Args, opts ...pulumi.ResourceOp
 		}
 		return pulumi.Aliases([]pulumi.Alias{{Name: pulumi.String(fd.Name + suffix), Parent: fd.Component}})
 	}
-	uri := pulumi.Sprintf("s3://%s/%s", bucketName, obj.Key)
+	uri := ts.URI
 	domain, err := apigatewayv2.NewDomainName(ctx, name+"-domain", &apigatewayv2.DomainNameArgs{
 		DomainName: pulumi.String(a.DomainName),
 		DomainNameConfiguration: &apigatewayv2.DomainNameDomainNameConfigurationArgs{
@@ -492,10 +406,112 @@ func New(ctx *pulumi.Context, name string, args *Args, opts ...pulumi.ResourceOp
 	return out, nil
 }
 
+// Certificate is what NewCertificate made.
+type Certificate struct {
+	// Certificate is the requested certificate and Validation its validation.
+	Certificate *acm.Certificate
+	Validation  *acm.CertificateValidation
+	// CertificateArn is the ARN of the certificate once ACM has issued it (the
+	// validation's), so that whatever uses it waits for the issue.
+	CertificateArn pulumi.StringOutput
+}
+
+// NewCertificate requests an ACM certificate for args.DomainName with DNS
+// validation, makes the validation record (as args.ValidationRecord or
+// args.CreateValidationRecord asks) and waits for ACM to issue it. The
+// resources are named name+"-certificate", name+"-certificate-validation-record"
+// and name+"-certificate-validation", unless args names them, and are made with
+// opts (the AWS provider, a parent). New uses it for Args.Certificate, so there
+// is one implementation.
+func NewCertificate(ctx *pulumi.Context, name string, args *CertificateArgs, opts ...pulumi.ResourceOption) (*Certificate, error) {
+	if args == nil {
+		return nil, errors.New("awsapigw: CertificateArgs is nil")
+	}
+	if err := errors.Join(args.validate("CertificateArgs", true)...); err != nil {
+		return nil, err
+	}
+	c := args
+	var tags pulumi.StringMapInput
+	if len(c.Tags) > 0 {
+		tags = pulumi.ToStringMap(c.Tags)
+	}
+	certName := name + "-certificate"
+	if c.Name != "" {
+		certName = c.Name
+	}
+	cargs := &acm.CertificateArgs{DomainName: pulumi.String(c.DomainName), ValidationMethod: pulumi.String("DNS"), Tags: tags}
+	if c.KeyAlgorithm != "" {
+		cargs.KeyAlgorithm = pulumi.String(c.KeyAlgorithm)
+	}
+	copts := slices.Clone(opts)
+	if len(c.Aliases) > 0 {
+		copts = append(copts, pulumi.Aliases(c.Aliases))
+	}
+	cert, err := acm.NewCertificate(ctx, certName, cargs, copts...)
+	if err != nil {
+		return nil, fmt.Errorf("awsapigw certificate: %w", err)
+	}
+	rec := ValidationRecord{
+		Name: validationField(cert, func(o acm.CertificateDomainValidationOption) *string { return o.ResourceRecordName }),
+		Type: validationField(cert, func(o acm.CertificateDomainValidationOption) *string { return o.ResourceRecordType }),
+		Value: validationField(cert, func(o acm.CertificateDomainValidationOption) *string {
+			return o.ResourceRecordValue
+		}),
+	}
+	var fqdn pulumi.StringInput
+	if v := c.ValidationRecord; v != nil {
+		fqdn, err = newValidationRecord(ctx, name, v, rec, opts)
+	} else {
+		fqdn, err = c.CreateValidationRecord(ctx, rec)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("awsapigw certificate validation record: %w", err)
+	}
+	validationName := name + "-certificate-validation"
+	if c.ValidationName != "" {
+		validationName = c.ValidationName
+	}
+	vopts := slices.Clone(opts)
+	if len(c.ValidationAliases) > 0 {
+		vopts = append(vopts, pulumi.Aliases(c.ValidationAliases))
+	}
+	valid, err := acm.NewCertificateValidation(ctx, validationName, &acm.CertificateValidationArgs{
+		CertificateArn:        cert.Arn,
+		ValidationRecordFqdns: pulumi.StringArray{fqdn},
+	}, vopts...)
+	if err != nil {
+		return nil, fmt.Errorf("awsapigw certificate validation: %w", err)
+	}
+	return &Certificate{Certificate: cert, Validation: valid, CertificateArn: valid.CertificateArn}, nil
+}
+
+// validate reports the problems of a certificate request. path names it in the
+// messages; needDomain is true when DomainName is the caller's to set (New sets
+// it from Args.DomainName, which Validate checks).
+func (c *CertificateArgs) validate(path string, needDomain bool) []error {
+	var errs []error
+	add := func(format string, v ...any) { errs = append(errs, fmt.Errorf("awsapigw: "+format, v...)) }
+	if needDomain && c.DomainName == "" {
+		add("%s.DomainName is required", path)
+	}
+	switch {
+	case (c.CreateValidationRecord == nil) == (c.ValidationRecord == nil):
+		add("%s: set exactly one of CreateValidationRecord and ValidationRecord", path)
+	case c.ValidationRecord != nil:
+		if c.ValidationRecord.Provider == nil {
+			add("%s.ValidationRecord.Provider is required", path)
+		}
+		if c.ValidationRecord.ZoneID == nil {
+			add("%s.ValidationRecord.ZoneID is required", path)
+		}
+	}
+	return errs
+}
+
 // newValidationRecord makes the DNS-only record ACM validates by and returns
 // its name, which the validation waits on.
 func newValidationRecord(
-	ctx *pulumi.Context, name string, v *ValidationRecordArgs, rec ValidationRecord, child pulumi.ResourceOption,
+	ctx *pulumi.Context, name string, v *ValidationRecordArgs, rec ValidationRecord, base []pulumi.ResourceOption,
 ) (pulumi.StringInput, error) {
 	rname := v.ResourceName
 	if rname == "" {
@@ -504,7 +520,7 @@ func newValidationRecord(
 	trim := func(o pulumi.StringOutput) pulumi.StringOutput {
 		return o.ApplyT(func(s string) string { return strings.TrimSuffix(s, ".") }).(pulumi.StringOutput)
 	}
-	opts := []pulumi.ResourceOption{child, pulumi.Provider(v.Provider)}
+	opts := append(slices.Clone(base), pulumi.Provider(v.Provider))
 	if len(v.Aliases) > 0 {
 		opts = append(opts, pulumi.Aliases(v.Aliases))
 	}
@@ -537,6 +553,127 @@ func validationField(c *acm.Certificate, f func(acm.CertificateDomainValidationO
 	}).(pulumi.StringOutput)
 }
 
+// TruststoreArgs asks for the truststore: the PEM bundle as one object, in a
+// bucket of the pattern's own or an existing one.
+type TruststoreArgs struct {
+	// PEM is the bundle of the CAs a client certificate must chain to.
+	// Required.
+	PEM string
+	// Bucket is where it goes. Exactly one field.
+	Bucket Truststore
+	// Tags are put on the bucket the pattern makes (NewBucket.Tags over
+	// them). Default none.
+	Tags map[string]string
+}
+
+// TruststoreResult is what NewTruststore made.
+type TruststoreResult struct {
+	// Bucket is the bucket the pattern made; nil for an existing one.
+	Bucket *s3.Bucket
+	// Object is the truststore object, at TruststoreKey.
+	Object *s3.BucketObjectv2
+	// BucketName is the bucket's name, made or existing.
+	BucketName pulumi.StringOutput
+	// URI is s3://<bucket>/<key>, which the domain's mutual TLS is given; the
+	// object's VersionId is what it pins.
+	URI pulumi.StringOutput
+}
+
+// truststoreName names a truststore resource: name+"-truststore"+suffix, or
+// "truststore"+suffix when name is empty (a stack with only a truststore,
+// whose resources carry no prefix).
+func truststoreName(name, suffix string) string {
+	if name == "" {
+		return "truststore" + suffix
+	}
+	return name + "-truststore" + suffix
+}
+
+// NewTruststore puts the PEM at TruststoreKey, in the bucket it makes
+// (args.Bucket.NewBucket: encrypted, versioned, closed to the public and to
+// plain HTTP, protected, with writes under TruststorePrefix denied to every
+// principal but the apply identities) or in the existing one the caller
+// attests to. The resources are named <name>-truststore, <name>-truststore-
+// encryption, -versioning, -public-access, -policy and -pem (the last is the
+// object, "<name>-truststore-pem"); an empty name drops the "<name>-" prefix.
+// They are made with opts. New uses it for Args.Truststore, so there is one
+// implementation.
+func NewTruststore(ctx *pulumi.Context, name string, args *TruststoreArgs, opts ...pulumi.ResourceOption) (*TruststoreResult, error) {
+	if args == nil {
+		return nil, errors.New("awsapigw: TruststoreArgs is nil")
+	}
+	var errs []error
+	if strings.TrimSpace(args.PEM) == "" {
+		errs = append(errs, errors.New("awsapigw: TruststoreArgs.PEM is required"))
+	}
+	errs = append(errs, args.Bucket.validate("TruststoreArgs.Bucket", guardOf)...)
+	if err := errors.Join(errs...); err != nil {
+		return nil, err
+	}
+	res := &TruststoreResult{}
+	var bucketID pulumi.StringInput
+	var after []pulumi.Resource
+	if e := args.Bucket.Existing; e != nil {
+		bucketID = pulumi.String(e.BucketName)
+		res.BucketName = pulumi.String(e.BucketName).ToStringOutput()
+	} else {
+		b, err := newTruststoreBucket(ctx, name, args, opts)
+		if err != nil {
+			return nil, err
+		}
+		res.Bucket = b.bucket
+		bucketID, res.BucketName, after = b.bucket.ID(), b.bucket.Bucket, b.ready
+	}
+	oopts := append(slices.Clone(opts), pulumi.DependsOn(after))
+	obj, err := s3.NewBucketObjectv2(ctx, truststoreName(name, "-pem"), &s3.BucketObjectv2Args{
+		Bucket:      bucketID,
+		Key:         pulumi.String(TruststoreKey),
+		Content:     pulumi.String(args.PEM),
+		ContentType: pulumi.String("application/x-pem-file"),
+	}, oopts...)
+	if err != nil {
+		return nil, fmt.Errorf("awsapigw truststore object: %w", err)
+	}
+	res.Object = obj
+	res.URI = pulumi.Sprintf("s3://%s/%s", res.BucketName, obj.Key)
+	return res, nil
+}
+
+// guardOf is the truststore's guard for the given apply principals.
+func guardOf(principals []string) ProtectedPrefix {
+	return ProtectedPrefix{Prefix: TruststorePrefix, AllowedPrincipalArns: principals}
+}
+
+// validate reports the problems of a truststore placement; path names it in
+// the messages.
+func (ts Truststore) validate(path string, guard func([]string) ProtectedPrefix) []error {
+	var errs []error
+	add := func(format string, v ...any) { errs = append(errs, fmt.Errorf("awsapigw: "+format, v...)) }
+	switch {
+	case (ts.NewBucket == nil) == (ts.Existing == nil):
+		add("%s: set exactly one of NewBucket and Existing", path)
+	case ts.NewBucket != nil:
+		if ts.NewBucket.Name == "" {
+			add("%s.NewBucket.Name is required", path)
+		}
+		if err := guard(ts.NewBucket.ApplyPrincipalArns).Validate(); err != nil {
+			errs = append(errs, err)
+		}
+	default:
+		e := ts.Existing
+		if e.BucketName == "" {
+			add("%s.Existing.BucketName is required", path)
+		}
+		if !e.Versioned {
+			add("%s.Existing is not attested versioned: the domain pins the truststore's version", path)
+		}
+		if !e.GuardedPrefix {
+			add("%s.Existing does not attest a guard on %q: whatever writes the bucket could replace the truststore", path, TruststorePrefix)
+		}
+	}
+	return errs
+}
+
 type truststoreBucket struct {
 	bucket *s3.Bucket
 	// ready is what the object waits for: versioning on and the policy in place.
@@ -546,8 +683,8 @@ type truststoreBucket struct {
 // newTruststoreBucket is the pattern's own small bucket: encrypted, versioned,
 // closed to the public and to plain HTTP, protected, with writes under the
 // truststore prefix denied to every principal but the apply identities.
-func newTruststoreBucket(ctx *pulumi.Context, name string, a *Args, child pulumi.ResourceOption) (*truststoreBucket, error) {
-	b := a.Truststore.NewBucket
+func newTruststoreBucket(ctx *pulumi.Context, name string, a *TruststoreArgs, opts []pulumi.ResourceOption) (*truststoreBucket, error) {
+	b := a.Bucket.NewBucket
 	merged := map[string]string{}
 	for k, v := range a.Tags {
 		merged[k] = v
@@ -559,12 +696,15 @@ func newTruststoreBucket(ctx *pulumi.Context, name string, a *Args, child pulumi
 	if len(merged) > 0 {
 		tags = pulumi.ToStringMap(merged)
 	}
-	bucket, err := s3.NewBucket(ctx, name+"-truststore", &s3.BucketArgs{Bucket: pulumi.String(b.Name), Tags: tags},
-		child, pulumi.Protect(true))
+	with := func(extra ...pulumi.ResourceOption) []pulumi.ResourceOption {
+		return append(slices.Clone(opts), extra...)
+	}
+	bucket, err := s3.NewBucket(ctx, truststoreName(name, ""), &s3.BucketArgs{Bucket: pulumi.String(b.Name), Tags: tags},
+		with(pulumi.Protect(true))...)
 	if err != nil {
 		return nil, fmt.Errorf("awsapigw truststore bucket: %w", err)
 	}
-	if _, err := s3.NewBucketServerSideEncryptionConfigurationV2(ctx, name+"-truststore-encryption",
+	if _, err := s3.NewBucketServerSideEncryptionConfigurationV2(ctx, truststoreName(name, "-encryption"),
 		&s3.BucketServerSideEncryptionConfigurationV2Args{
 			Bucket: bucket.ID(),
 			Rules: s3.BucketServerSideEncryptionConfigurationV2RuleArray{
@@ -574,25 +714,25 @@ func newTruststoreBucket(ctx *pulumi.Context, name string, a *Args, child pulumi
 					},
 				},
 			},
-		}, child); err != nil {
+		}, with()...); err != nil {
 		return nil, err
 	}
-	versioning, err := s3.NewBucketVersioningV2(ctx, name+"-truststore-versioning", &s3.BucketVersioningV2Args{
+	versioning, err := s3.NewBucketVersioningV2(ctx, truststoreName(name, "-versioning"), &s3.BucketVersioningV2Args{
 		Bucket:                  bucket.ID(),
 		VersioningConfiguration: &s3.BucketVersioningV2VersioningConfigurationArgs{Status: pulumi.String("Enabled")},
-	}, child)
+	}, with()...)
 	if err != nil {
 		return nil, err
 	}
-	block, err := s3.NewBucketPublicAccessBlock(ctx, name+"-truststore-public-access", &s3.BucketPublicAccessBlockArgs{
+	block, err := s3.NewBucketPublicAccessBlock(ctx, truststoreName(name, "-public-access"), &s3.BucketPublicAccessBlockArgs{
 		Bucket: bucket.ID(), BlockPublicAcls: pulumi.Bool(true), BlockPublicPolicy: pulumi.Bool(true),
 		IgnorePublicAcls: pulumi.Bool(true), RestrictPublicBuckets: pulumi.Bool(true),
-	}, child)
+	}, with()...)
 	if err != nil {
 		return nil, err
 	}
-	guard := a.guard(b.ApplyPrincipalArns)
-	policy, err := s3.NewBucketPolicy(ctx, name+"-truststore-policy", &s3.BucketPolicyArgs{
+	guard := guardOf(b.ApplyPrincipalArns)
+	policy, err := s3.NewBucketPolicy(ctx, truststoreName(name, "-policy"), &s3.BucketPolicyArgs{
 		Bucket: bucket.ID(),
 		Policy: bucket.Arn.ApplyT(func(arn string) (string, error) {
 			return jsonDocument([]map[string]any{{
@@ -601,7 +741,7 @@ func newTruststoreBucket(ctx *pulumi.Context, name string, a *Args, child pulumi
 				"Condition": map[string]any{"Bool": map[string]any{"aws:SecureTransport": "false"}},
 			}, guard.Statement(arn)})
 		}).(pulumi.StringOutput),
-	}, child, pulumi.DependsOn([]pulumi.Resource{block}))
+	}, with(pulumi.DependsOn([]pulumi.Resource{block}))...)
 	if err != nil {
 		return nil, err
 	}
