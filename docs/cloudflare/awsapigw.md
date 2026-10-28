@@ -104,6 +104,27 @@ role, an admin role, a break-glass role; roles, never sessions).
   versioned and carries the guard (put `ProtectedPrefix{...}.Statement(bucketARN)`
   in its policy), and it refuses an attestation that is not given.
 
+## Using the certificate and the truststore without a front door
+
+`New` needs the HTTP API. A stack whose API is made by another tool still wants
+the certificate and the guarded truststore, and gets them from the two builders
+`New` itself uses:
+
+- `NewCertificate(ctx, name, &CertificateArgs{DomainName, ValidationRecord: ...}, opts...)`
+  returns the certificate, its validation and `CertificateArn` (the validation's,
+  so it resolves only once ACM has issued). `Name`, `ValidationName`,
+  `ValidationRecord.ResourceName` and the aliases set the logical names, to adopt
+  resources a stack already has.
+- `NewTruststore(ctx, name, &TruststoreArgs{PEM, Bucket}, opts...)` returns the
+  bucket (when made), the object, `BucketName` and `URI`; the object's `VersionId`
+  is what a domain pins. With an empty `name` the resources are named
+  `truststore`, `truststore-encryption`, `truststore-versioning`,
+  `truststore-public-access`, `truststore-policy` and `truststore-pem`; with a
+  name they are `<name>-truststore...`, as inside `New`.
+
+Pass the AWS provider and any parent as `opts`; the validation record takes its
+Cloudflare provider from `ValidationRecordArgs.Provider`.
+
 ## DNS ownership
 
 DNS is yours unless you pass `DNS`. Without it, point `DomainName` at
