@@ -54,6 +54,10 @@ service:
   externalTrafficPolicy: ""
   patch: {}
 useListenerPortAsContainerPort: false
+container:
+  resources: {}
+shutdownManager:
+  resources: {}
 shutdown:
   drainTimeout: ""
   minDrainDuration: ""
@@ -184,6 +188,13 @@ never both.
 {{- with $spread }}{{- $_ := set $pod "topologySpreadConstraints" . }}{{- end -}}
 {{- $deploy := dict "replicas" $p.replicas -}}
 {{- with $pod }}{{- $_ := set $deploy "pod" . }}{{- end -}}
+{{- with $p.container.resources }}{{- $_ := set $deploy "container" (dict "resources" .) }}{{- end -}}
+{{- /* The shutdown-manager sidecar has no typed resources field in the
+       API: its requests reach it through the Deployment's strategic-merge
+       patch, which matches the container by name. */ -}}
+{{- with $p.shutdownManager.resources }}
+{{- $_ := set $deploy "patch" (dict "type" "StrategicMerge" "value" (dict "spec" (dict "template" (dict "spec" (dict "containers" (list (dict "name" "shutdown-manager" "resources" .))))))) -}}
+{{- end -}}
 {{- $k8s := dict "envoyService" $svc "envoyDeployment" $deploy -}}
 {{- $pdb := $p.podDisruptionBudget -}}
 {{- if not (kindIs "invalid" $pdb.minAvailable) -}}

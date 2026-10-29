@@ -1,0 +1,26 @@
+# Resource requests for the envoy container and the shutdown-manager sidecar.
+classes:
+  internal:
+    mergeGateways: true
+    proxy:
+      container:
+        resources:
+          requests:
+            cpu: 50m
+            memory: 256Mi
+      shutdownManager:
+        resources:
+          requests:
+            cpu: 5m
+            memory: 16Mi
+
+exposures:
+  public:
+    class: internal
+    health:
+      hostname: gateway-health.example.com
+      certificate:
+        issuerRef:
+          name: example-ca
+          kind: ClusterIssuer
+          group: cert-manager.io

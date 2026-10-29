@@ -282,6 +282,20 @@
           }
         },
         "useListenerPortAsContainerPort": { "type": "boolean" },
+        "container": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "resources": { "type": "object" }
+          }
+        },
+        "shutdownManager": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "resources": { "type": "object" }
+          }
+        },
         "passthrough": { "type": "boolean" },
         "shutdown": {
           "type": "object",
