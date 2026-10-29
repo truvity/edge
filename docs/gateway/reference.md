@@ -118,6 +118,8 @@ VictoriaMetrics operator's conversion should not have to.
 | `proxy.service.externalTrafficPolicy` | `""` | |
 | `proxy.service.patch` | `{}` | `{type, value}`, merged over the fields above |
 | `proxy.useListenerPortAsContainerPort` | `false` | |
+| `proxy.container.resources` | `{}` | `{requests, limits}` of the `envoy` container, rendered as `envoyDeployment.container.resources`; empty renders nothing and the controller's defaults apply. Example: `{requests: {cpu: 50m, memory: 256Mi}}` |
+| `proxy.shutdownManager.resources` | `{}` | `{requests, limits}` of the `shutdown-manager` sidecar. The API has no typed field for it (Envoy Gateway 1.9 only sets its image, on the controller), so it is rendered as a strategic-merge `envoyDeployment.patch` naming the container; empty renders nothing |
 | `proxy.shutdown.drainTimeout` | `""` | |
 | `proxy.shutdown.minDrainDuration` | `""` | |
 | `proxy.shutdown.healthCheckFailureDelay` | `""` | fail readiness this long before draining, so a load balancer removes the endpoint first |

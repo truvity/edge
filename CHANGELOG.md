@@ -5,6 +5,12 @@ heading here is a patch cut automatically for dependency bumps alone; its
 GitHub Release lists them. The chart and the Go module are released
 together at every version.
 
+## Unreleased
+
+### Added
+
+- **`gateway-fleet`: `proxy.container.resources` and `proxy.shutdownManager.resources`** (also under `proxyDefaults` and per-exposure `proxy`). They set the requests and limits of the proxy pods' `envoy` container (`EnvoyProxy.spec.provider.kubernetes.envoyDeployment.container.resources`) and of the `shutdown-manager` sidecar (a strategic-merge `envoyDeployment.patch`, since the API has no typed field). Both default to empty and render nothing, so existing renders are unchanged.
+
 ## v4.4.0
 
 ### Added

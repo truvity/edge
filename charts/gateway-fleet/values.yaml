@@ -84,6 +84,12 @@ classes: {}
 #        externalTrafficPolicy: ""
 #        patch: {}                  # {type, value}, merged over the above
 #      useListenerPortAsContainerPort: false
+#      # Resource requests/limits of the proxy pods' containers. Empty (the
+#      # default) renders nothing, so the controller's own defaults apply.
+#      container:
+#        resources: {}              # the envoy container: {requests, limits}
+#      shutdownManager:
+#        resources: {}              # the shutdown-manager sidecar
 #      shutdown:
 #        drainTimeout: ""
 #        minDrainDuration: ""
