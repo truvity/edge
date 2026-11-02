@@ -120,3 +120,20 @@ func TestZoneArgsRefusesABadBlock(t *testing.T) {
 	_, err = zonestack.ZoneArgs("example.com", z)
 	require.ErrorContains(t, err, "ssl_mode_rules[a.example.com]")
 }
+
+func TestZoneArgsCarriesRedirectsAndTheirImport(t *testing.T) {
+	z := config.Zone{
+		Name: "example.com", ZoneID: "z", Redirects: []config.RedirectCfg{{
+			Ref: "www_to_apex", From: "www.example.com", To: "https://example.com",
+		}},
+		RedirectRulesImportID: "feed0001feed0002feed0003feed0004",
+	}
+
+	args, err := zonestack.ZoneArgs("example.com", z)
+	require.NoError(t, err)
+	require.NotNil(t, args.Redirects)
+	assert.Equal(t, "example.com", args.Redirects.Zone)
+	assert.Equal(t, "www_to_apex", args.Redirects.Entries[0].Ref)
+	assert.Equal(t, "feed0001feed0002feed0003feed0004",
+		args.ImportRulesets[rules.PhaseDynamicRedirect])
+}

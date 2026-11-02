@@ -3,6 +3,7 @@ package rules
 import (
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/truvity/edge/v4/cloudflare/zonespec"
@@ -106,6 +107,62 @@ func TrustedClients(t *zonespec.TrustedClients) (Contribution, error) {
 		}},
 		Logging: true,
 	}}
+
+	return c, nil
+}
+
+// Redirects is the zone's canonical-host Single Redirects: one rule per
+// declared source host in the http_request_dynamic_redirect phase. Each
+// rule matches the exact host on HTTP and HTTPS and every path, and answers
+// with the HTTPS destination plus the request's path; the query string is
+// kept unless PreserveQueryString is false. Entries are sorted by source
+// host, then ref, so the plan never depends on authoring order. An unmanaged
+// block (nil or no entries) is a contribution with no rules.
+func Redirects(r *zonespec.Redirects) (Contribution, error) {
+	c := Contribution{Source: "redirects", Phase: PhaseDynamicRedirect, Order: OrderHostsCache}
+	if !r.Managed() {
+		return c, nil
+	}
+
+	if err := (&zonespec.Args{ZoneID: validationZone, Redirects: r}).Validate(); err != nil {
+		return Contribution{}, err
+	}
+
+	entries := append([]zonespec.Redirect(nil), r.Entries...)
+	sort.SliceStable(entries, func(i, j int) bool {
+		if entries[i].From != entries[j].From {
+			return entries[i].From < entries[j].From
+		}
+
+		return entries[i].Ref < entries[j].Ref
+	})
+
+	for i := range entries {
+		e := &entries[i]
+
+		status := e.Status
+		if status == 0 {
+			status = 301
+		}
+
+		preserve := true
+		if e.PreserveQueryString != nil {
+			preserve = *e.PreserveQueryString
+		}
+
+		c.Rules = append(c.Rules, Rule{
+			Ref:         e.Ref,
+			Description: fmt.Sprintf("%s: redirect to %s", e.From, e.To),
+			Action:      ActionRedirect,
+			Expression:  fmt.Sprintf(`http.host eq "%s"`, e.From),
+			Disabled:    e.Disabled,
+			Params: Params{Redirect: &RedirectParams{
+				TargetURL:           fmt.Sprintf("concat(%q, http.request.uri.path)", e.To),
+				StatusCode:          status,
+				PreserveQueryString: preserve,
+			}},
+		})
+	}
 
 	return c, nil
 }

@@ -180,12 +180,20 @@ type (
 		// so a rule added in the dashboard is replaced.
 		RateLimits *RateLimitsCfg `yaml:"rate_limits,omitempty"`
 		// Records are DNS records this zone serves for an origin no tunnel
-		// carries (a load balancer, a CDN): the one place a hostname is
-		// written here rather than derived from the edge catalog. Only
-		// the listed records are managed; the zone's other records (hand
-		// made, imported) stay as they are. A name a tunnel serves is
-		// refused (validateRecordTunnels).
+		// carries (a load balancer, a CDN), and child-zone NS delegations:
+		// the one place a hostname is written here rather than derived
+		// from the edge catalog. Only the listed records are managed; the
+		// zone's other records (hand made, imported) stay as they are. A
+		// name a tunnel serves is refused (validateRecordTunnels), and so
+		// is a tunnel host at or below an NS delegation.
 		Records []RecordCfg `yaml:"records,omitempty"`
+		// Redirects are the zone's canonical-host Single Redirects: the
+		// complete intended rule list of the
+		// http_request_dynamic_redirect phase. Nil manages no redirect
+		// ruleset; a declared list owns the phase. A redirect whose source
+		// record is proxied makes that record wait for the ruleset's apply
+		// (zone.Args.Redirects), and a DNS-only source stages it inert.
+		Redirects []RedirectCfg `yaml:"redirects,omitempty"`
 		// OriginCNAMEs is the switch that moves a tunnel-served host's
 		// proxied CNAME off its tunnel and onto another origin (the AWS
 		// API Gateway regional domain name of a service that fronts
@@ -219,6 +227,12 @@ type (
 		// entrypoint cannot be created). Remove it once that apply is done: a
 		// standing import blocks every later replace.
 		ConfigRulesImportID string `yaml:"config_rules_import_id,omitempty"`
+		// RedirectRulesImportID is the same for the
+		// http_request_dynamic_redirect phase: adopt an existing Single
+		// Redirects entry point ruleset by id, preserving its rule refs.
+		// Requires `redirects` (the complete intended rule list). Remove it
+		// once that apply is done.
+		RedirectRulesImportID string `yaml:"redirect_rules_import_id,omitempty"`
 		// AlwaysUseHTTPS is the zone setting always_use_https: true
 		// redirects every plain-HTTP request to HTTPS. Nil leaves it
 		// unmanaged.
@@ -304,7 +318,7 @@ type (
 	}
 
 	// RecordCfg mirrors cloudflare/zonespec Record in this file's
-	// snake_case: one A, AAAA or CNAME record.
+	// snake_case: one A, AAAA, CNAME or child-zone NS record.
 	RecordCfg struct {
 		Name    string `yaml:"name"`
 		Type    string `yaml:"type"`
@@ -314,8 +328,28 @@ type (
 		Comment string `yaml:"comment,omitempty"`
 		// WAF is false to leave a proxied record's name out of a zone's
 		// derived managed WAF; absent is covered. False needs WAFReason.
+		// Never set on NS.
 		WAF       *bool  `yaml:"waf,omitempty"`
 		WAFReason string `yaml:"waf_reason,omitempty"`
+	}
+
+	// RedirectCfg is one canonical-host Single Redirect in this file's
+	// snake_case. The source is matched exactly on HTTP and HTTPS for every
+	// path; To is an HTTPS origin and the request's path is appended. A
+	// source whose DNS record is proxied makes that record wait for this
+	// rule's ruleset (the explicit rule-before-proxy dependency); a DNS-only
+	// source stages the rule without effect.
+	RedirectCfg struct {
+		Ref  string `yaml:"ref"`
+		From string `yaml:"from"`
+		To   string `yaml:"to"`
+		// Status is 301 (default), 302, 307 or 308.
+		Status int `yaml:"status,omitempty"`
+		// PreserveQueryString keeps the query string; absent means true.
+		PreserveQueryString *bool `yaml:"preserve_query_string,omitempty"`
+		// Disabled keeps the rule and its ref but makes it inert: the second
+		// stage of the rollback.
+		Disabled bool `yaml:"disabled,omitempty"`
 	}
 
 	// RateLimitsCfg mirrors cloudflare/zonespec RateLimits in
@@ -824,6 +858,16 @@ func (c *Config) deriveWAF(fromCatalog map[string][]string) error {
 				return fmt.Errorf("%s: zones[%s].records[%s].waf_reason: only meaningful with waf: false", FileName, name, r.Name)
 			}
 
+			// A delegation is DNS only and never a WAF host, even if an
+			// invalid row asked for both: reject it rather than derive it.
+			if r.Type == "NS" {
+				if r.Proxied || r.WAF != nil {
+					return fmt.Errorf("%s: zones[%s].records[%s]: an NS delegation is DNS only and takes no WAF", FileName, name, r.Name)
+				}
+
+				continue
+			}
+
 			if !(cfzone.Record{Proxied: r.Proxied, WAF: r.WAF}).WAFCovered() {
 				continue
 			}
@@ -1314,6 +1358,10 @@ func (z Zone) validateEdge(where, zone string) error {
 		return err
 	}
 
+	if err := z.validateRedirects(where+".redirects", zone); err != nil {
+		return err
+	}
+
 	if err := z.validateOriginCNAMEs(where+".origin_cnames", zone); err != nil {
 		return err
 	}
@@ -1428,8 +1476,34 @@ func (z Zone) RecordsLibrary(zone string) *cfzone.Records {
 	return out
 }
 
-// validateRecords holds the zone's records to the library's own rules.
+// RedirectsLibrary is the zone's canonical-host redirects as the library
+// takes them, or nil when the zone declares none. The zone name is filled
+// here because the file's `redirects` list sits under its zone key.
+func (z Zone) RedirectsLibrary(zone string) *cfzone.Redirects {
+	if z.SecurityTxtOnly() || len(z.Redirects) == 0 {
+		return nil
+	}
+
+	out := &cfzone.Redirects{Zone: zone, Entries: make([]cfzone.Redirect, 0, len(z.Redirects))}
+	for _, r := range z.Redirects {
+		out.Entries = append(out.Entries, cfzone.Redirect{
+			Ref: r.Ref, From: r.From, To: r.To, Status: r.Status,
+			PreserveQueryString: r.PreserveQueryString, Disabled: r.Disabled,
+		})
+	}
+
+	return out
+}
+
+// validateRecords holds the zone's records to the library's own rules, and
+// keeps an NS delegation out of the WAF's vocabulary entirely.
 func (z Zone) validateRecords(where, zone string) error {
+	for _, r := range z.Records {
+		if r.Type == "NS" && (r.WAF != nil || r.WAFReason != "") {
+			return fmt.Errorf("%s[%s]: an NS delegation takes no WAF options; remove waf and waf_reason", where, r.Name)
+		}
+	}
+
 	recs := z.RecordsLibrary(zone)
 	if recs == nil {
 		return nil
@@ -1442,16 +1516,57 @@ func (z Zone) validateRecords(where, zone string) error {
 	return nil
 }
 
+// validateRedirects holds the zone's redirects to the library's own rules,
+// and keeps an import id to a phase the zone actually declares.
+func (z Zone) validateRedirects(where, zone string) error {
+	if id := z.RedirectRulesImportID; id != "" {
+		if len(z.Redirects) == 0 {
+			return fmt.Errorf("%s.redirect_rules_import_id: set without redirects, nothing would adopt it", where)
+		}
+
+		if !rulesetIDPattern.MatchString(id) {
+			return fmt.Errorf("%s.redirect_rules_import_id: %q is not a ruleset id (32 lowercase hex digits)", where, id)
+		}
+	}
+
+	redirects := z.RedirectsLibrary(zone)
+	if redirects == nil {
+		return nil
+	}
+
+	if err := (&cfzone.Args{ZoneID: zone, Redirects: redirects}).Validate(); err != nil {
+		return fmt.Errorf("%s: %w", where, err)
+	}
+
+	return nil
+}
+
 // validateRecordTunnels refuses a record on a name a tunnel carries: the
 // tunnel already owns that name's CNAME, and two owners of one record
 // fight on every apply. A name the catalog marks dns_elsewhere is the
 // exception: the tunnel writes no record for it, so a record here is its
 // one writer.
+//
+// An NS delegation is stronger: the child zone cut takes the whole name and
+// everything below it, so a tunnel host exactly at or anywhere under the
+// delegation would be hidden from the parent zone. The tunnel would keep an
+// ingress rule and lose its CNAME.
 func (c *Config) validateRecordTunnels() error {
 	for _, name := range sortedKeys(c.Zones) {
 		for _, r := range c.Zones[name].Records {
 			for i := range c.Tunnels {
 				t := &c.Tunnels[i]
+
+				if r.Type == "NS" {
+					for _, host := range t.Hosts {
+						if t.OwnsRecord(name, host) && atOrBelow(host, r.Name) {
+							return fmt.Errorf("%s: zones[%s].records[%s]: tunnel %s writes %s at or below this NS delegation; "+
+								"the child zone cut would hide the parent tunnel record", FileName, name, r.Name, t.Name(), host)
+						}
+					}
+
+					continue
+				}
 
 				if t.OwnsRecord(name, r.Name) {
 					return fmt.Errorf("%s: zones[%s].records[%s]: tunnel %s already carries this host (the edge catalog)",
@@ -1462,6 +1577,15 @@ func (c *Config) validateRecordTunnels() error {
 	}
 
 	return nil
+}
+
+// atOrBelow reports whether host is the NS owner or a name under it. A
+// leading "*." is removed first: a wildcard record below a delegation is
+// hidden by the child zone cut just as an exact one is.
+func atOrBelow(host, owner string) bool {
+	host = strings.TrimPrefix(host, "*.")
+
+	return host == owner || strings.HasSuffix(host, "."+owner)
 }
 
 // validateOriginTunnels holds every origin_cnames key to a host a tunnel

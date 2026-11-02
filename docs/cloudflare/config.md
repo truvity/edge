@@ -61,7 +61,9 @@ zones:
     ssl_mode_rule_refs: {<host>: <32 hex>}
     config_rules_import_id: <32 hex>
     origin_cnames: {<host>: "" | d-<id>.execute-api.<region>.amazonaws.com}
-    records: [{name, type: A | AAAA | CNAME, content, proxied, ttl, comment, waf: false, waf_reason}]
+    records: [{name, type: A | AAAA | CNAME | NS, content, proxied, ttl, comment, waf: false, waf_reason}]
+    redirects: [{ref, from, to, status: 301, preserve_query_string: true, disabled}]
+    redirect_rules_import_id: <32 hex>     # adopt an existing Single Redirects entry point
     security_txt: {contact: [mailto: | https:], expires: <RFC 3339>, preferred_languages}
 fleets:
   internal: {service: <name>, namespace: <ns>}   # required
@@ -195,6 +197,110 @@ served before the zone stack lists it) leaves a gap. Both stacks load the same
 config at the same commit, so the zone stack sees every name the services stack
 will create.
 
+## DNS records and child-zone delegations
+
+`records` is the one place a zone's addresses are written down rather than
+derived from the catalog. Only the listed records are managed; a record the
+zone already has (hand-made, imported, or a tunnel's CNAME) is left alone
+unless a row names it, and naming a row does **not** adopt an existing
+Cloudflare record: import the existing record by its Cloudflare id onto the
+zone component's child name before the first apply. The child names are
+`record-<zone>-<host-slug>-cname` for a CNAME and
+`record-<zone>-<host-slug>-<type>-<content-slug>` for A, AAAA and NS
+(`zone.RecordName`). The A/AAAA/CNAME names are unchanged.
+
+`NS` is a child-zone delegation. Its content is one lower-case nameserver
+hostname without a trailing dot; several rows with the same owner are one NS
+set, one Cloudflare record per target, and every target must share the same
+explicit TTL (60 to 86400). An NS delegation is DNS only and is refused with
+`proxied: true` or any `waf`/`waf_reason`; it never joins the managed WAF and
+needs no certificate. The owner must be a name below the zone — the apex NS
+set is Cloudflare's — and must not be a wildcard. A tunnel host exactly at or
+anywhere below an NS owner is refused: the child zone cut would hide that
+parent-zone tunnel record. Child-zone contents stay with the child's own
+provider; a delegation does not create or manage them.
+
+```yaml
+zones:
+  example.com:
+    records:
+      - {name: team.example.com, type: NS, content: ns1.nameservers.example, ttl: 300}
+      - {name: team.example.com, type: NS, content: ns2.nameservers.example, ttl: 300}
+      - {name: team.example.com, type: NS, content: ns3.nameservers.example, ttl: 300}
+      - {name: team.example.com, type: NS, content: ns4.nameservers.example, ttl: 300}
+```
+
+The four rows are four resources: `record-<zone>-team-example-com-ns-ns1-nameservers-example`
+and so on. Reordering the rows does not rename them. A row is not an import:
+to adopt an existing record, import `cloudflare:index/dnsRecord:DnsRecord` as
+that zone component child (with the zone component as its parent) and the
+provider id `<zone_id>/<dns_record_id>`.
+
+## Canonical-host Single Redirects
+
+`redirects` owns the zone's whole `http_request_dynamic_redirect` phase (the
+dashboard's Single Redirects). Each entry matches one exact source host on
+HTTP and HTTPS and every path, and answers with `to` plus the request's path;
+`preserve_query_string` (default true) keeps the query string. `to` is an
+HTTPS origin only (`https://example.com`, no path, port, query or fragment),
+because the request path is appended. `status` is 301 (default), 302, 307 or
+308. `ref` is stable and unique in the phase.
+
+```yaml
+zones:
+  example.com:
+    redirects:
+      - ref: www_to_apex
+        from: www.example.com
+        to: https://example.com
+        status: 301
+        preserve_query_string: true
+```
+
+The rendered Cloudflare rule is exactly:
+
+| Property | Value |
+|---|---|
+| Ruleset scope / kind | the zone / `zone` |
+| Phase | `http_request_dynamic_redirect` |
+| Ref | `www_to_apex` |
+| Match | `http.host eq "www.example.com"` (HTTP and HTTPS, every path) |
+| Action | `redirect` |
+| Target URL expression | `concat("https://example.com", http.request.uri.path)` |
+| Status | `301` |
+| Preserve query string | `true` |
+
+Validation refuses a source outside the zone, a wildcard, an HTTPS
+destination with a path/port/query/fragment, a repeated ref or source,
+an unsupported status, and a loop visible between the declared redirects (a
+chain ending outside the declarations is allowed). No regex and no WAF
+feature is involved.
+
+**Token permission.** The zone stack's token needs `Dynamic URL Redirects
+Write` (the dashboard's "Single Redirect > Edit"). It is not in
+`account.ZonePolicies`/`EdgePolicies`: add `account.RedirectPolicies` for the
+zones that manage redirects, use `account.EdgePoliciesWithRedirects`, or (for
+the `zone` preset) set `presets.Row.RedirectZones`. Keep the zone in that list
+until its last redirect ruleset has been deleted; the same grant authorizes
+the delete. See [presets.md](presets.md#redirect-permission-lifecycle).
+
+**Rule before proxy.** If one of the zone's `records` entries has the same
+name as a redirect source and is `proxied: true`, that DNS record carries an
+explicit Pulumi `DependsOn` on the redirect ruleset: the proxy update waits
+for the ruleset's API apply, regardless of declaration order. A source record
+that is still DNS-only is valid and stages the rule inert; enable it by making
+the record proxied.
+
+**Adoption and rollback.** A zone has one entry point ruleset per phase.
+`redirect_rules_import_id` adopts the existing one by its 32-hex id (with its
+rule refs) instead of creating a second; the provider id is
+`zones/<zone_id>/<ruleset_id>`, and the field is removed once that apply is
+done. The declared `redirects` list must be the complete intended rule list
+for the phase. For rollback, first restore the source DNS to its legacy
+DNS-only state while keeping the rule declared, then set `disabled: true` (or
+remove the entry) in a second apply. A disabled entry keeps its ref and the
+ruleset identity.
+
 ## Contributions
 
 `Zone.Contributions()` returns the rules a zone's blocks ask for as
@@ -213,11 +319,12 @@ none by hand:
 Not included: the cacheable hosts (`cache` with the derived `Zone.CacheHosts`,
 which the zone component takes as `zonespec.Args.Cache`) and the settings that
 are not rules (`always_use_https`, `hsts`, `total_tls`, `min_tls_version`,
-`records`). A caller that passes these contributions must not also pass the
+`records`), and `redirects`, which the zone component takes as its own block
+(`zonespec.Args.Redirects`). A caller that passes these contributions must not also pass the
 same blocks as `zonespec.Args.RateLimits`, `TrustedClients` or `ManagedWAF`.
 The `Library` methods (`RateLimitsCfg`, `TrustedClientsCfg`, `HSTSCfg`,
-`ManagedWAFCfg`, `Zone.RecordsLibrary`) convert one block to the zone
-component's input.
+`ManagedWAFCfg`, `Zone.RecordsLibrary`, `Zone.RedirectsLibrary`) convert one
+block to the zone component's input.
 
 ## Per-account view and stack names
 

@@ -512,3 +512,87 @@ func TestRateLimitRefsAreSlugs(t *testing.T) {
 	_, err = rules.RateLimits("pro", []zonespec.RateLimitRule{row("!!!")})
 	require.ErrorContains(t, err, "no letter or digit")
 }
+
+func TestRedirectsContribution(t *testing.T) {
+	keep := true
+	c, err := rules.Redirects(&zonespec.Redirects{
+		Zone: "example.com",
+		Entries: []zonespec.Redirect{
+			{Ref: "z_last", From: "z.example.com", To: "https://example.com"},
+			{
+				Ref: "www_to_apex", From: "www.example.com", To: "https://example.com",
+				Status: 308, PreserveQueryString: &keep, Disabled: true,
+			},
+		},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, rules.PhaseDynamicRedirect, c.Phase)
+	assert.Equal(t, "redirects", c.Source)
+	require.Len(t, c.Rules, 2, "entries are sorted by source host, not authoring order")
+
+	first := c.Rules[0]
+	assert.Equal(t, "www_to_apex", first.Ref)
+	assert.Equal(t, "redirect", first.Action)
+	assert.Equal(t, `http.host eq "www.example.com"`, first.Expression)
+	assert.True(t, first.Disabled)
+	require.NotNil(t, first.Params.Redirect)
+	assert.Equal(t, `concat("https://example.com", http.request.uri.path)`, first.Params.Redirect.TargetURL)
+	assert.Equal(t, 308, first.Params.Redirect.StatusCode)
+	assert.True(t, first.Params.Redirect.PreserveQueryString)
+
+	assert.Equal(t, "z_last", c.Rules[1].Ref)
+	assert.Equal(t, 301, c.Rules[1].Params.Redirect.StatusCode, "301 is the default")
+	assert.True(t, c.Rules[1].Params.Redirect.PreserveQueryString, "query preservation is the default")
+
+	empty, err := rules.Redirects(nil)
+	require.NoError(t, err)
+	assert.Empty(t, empty.Rules)
+	assert.Equal(t, rules.PhaseDynamicRedirect, empty.Phase)
+
+	_, err = rules.Redirects(&zonespec.Redirects{
+		Zone:    "example.com",
+		Entries: []zonespec.Redirect{{Ref: "www_to_apex", From: "www.example.com", To: "http://example.com"}},
+	})
+	require.ErrorContains(t, err, "HTTPS")
+}
+
+func TestAssembleKeepsTheDynamicRedirectPhase(t *testing.T) {
+	c, err := rules.Redirects(&zonespec.Redirects{
+		Zone:    "example.com",
+		Entries: []zonespec.Redirect{{Ref: "www_to_apex", From: "www.example.com", To: "https://example.com"}},
+	})
+	require.NoError(t, err)
+
+	got, err := rules.Assemble([]rules.Contribution{c})
+	require.NoError(t, err)
+	assert.Contains(t, got, rules.PhaseDynamicRedirect)
+	assert.NotContains(t, got, rules.PhaseCacheSettings, "no unrelated phase is invented")
+	assert.Equal(t, "www_to_apex", got[rules.PhaseDynamicRedirect][0].Ref)
+}
+
+// TestRedirectTargetCoversEveryPath pins the emitted expression and checks
+// its one literal/path shape for root, nested and percent-encoded request
+// paths; query preservation is the action parameter, not a second concat.
+func TestRedirectTargetCoversEveryPath(t *testing.T) {
+	c, err := rules.Redirects(&zonespec.Redirects{
+		Zone:    "example.com",
+		Entries: []zonespec.Redirect{{Ref: "www_to_apex", From: "www.example.com", To: "https://example.com"}},
+	})
+	require.NoError(t, err)
+
+	r := c.Rules[0].Params.Redirect
+	require.NotNil(t, r)
+	assert.Equal(t, `concat("https://example.com", http.request.uri.path)`, r.TargetURL)
+	assert.True(t, r.PreserveQueryString)
+	assert.NotContains(t, r.TargetURL, "http.request.uri.query",
+		"the query is kept by preserveQueryString, so it is not concatenated twice")
+
+	// The expression is concat("<origin>", http.request.uri.path): evaluating
+	// it for a path appends that path unchanged, including its encoding.
+	const prefix, suffix = `concat("`, `", http.request.uri.path)`
+	origin := strings.TrimSuffix(strings.TrimPrefix(r.TargetURL, prefix), suffix)
+
+	for _, path := range []string{"/", "/a/b", "/a%20b", "/a%2Fb"} {
+		assert.Equal(t, "https://example.com"+path, origin+path)
+	}
+}

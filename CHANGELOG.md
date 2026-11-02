@@ -5,6 +5,13 @@ heading here is a patch cut automatically for dependency bumps alone; its
 GitHub Release lists them. The chart and the Go module are released
 together at every version.
 
+## Unreleased
+
+### Added
+
+- **`cloudflare/config`, `cloudflare/zonespec`, `cloudflare/zone`: DNS-only child-zone NS delegations.** `records` accepts `type: NS`: one nameserver hostname per row, several rows for one owner, an explicit TTL shared by the set (60 to 86400), and no proxy, WAF or certificate. Each target is its own Cloudflare DNS record, named `record-<zone>-<host-slug>-ns-<content-slug>` (`zone.RecordName`), so declaration order never changes an identity. The owner must be an exact name below the zone (never the apex, never a wildcard), and a tunnel host exactly at or anywhere under the delegation is refused: the child zone cut would hide the parent tunnel record. NS never joins the derived managed WAF and never synthesizes child-zone contents. A/AAAA/CNAME child names and the tunnel-CNAME handover are unchanged. An existing NS record is adopted by its Cloudflare record id; declaring the row is not automatic import.
+- **`cloudflare/config`, `cloudflare/zonespec`, `cloudflare/rulespec`, `cloudflare/rules`, `cloudflare/zone`: canonical-host Single Redirects.** A zone's `redirects` list owns the whole `http_request_dynamic_redirect` phase: exact source host on HTTP/HTTPS and every path, stable `ref`, HTTPS destination origin, status 301 (default) or 302/307/308, and query preservation (default true); the target expression is `concat("<https origin>", http.request.uri.path)`. Validation refuses an unreachable source or destination, a repeated ref or source, an unsupported status and a loop visible between declared redirects. `redirect_rules_import_id` adopts an existing phase entry point by id, preserving rule refs; the declared list must be the complete intended rule list. A proxied source DNS record gets an explicit Pulumi dependency on the redirect ruleset, so its proxy update waits for the rule; a DNS-only source stages the rule inert. Rollback keeps the rule's identity while it is restored to DNS-only and then disabled (`disabled: true`). New child name: `redirect-rules-<name>`. The permission `Dynamic URL Redirects Write` (dashboard: Single Redirect > Edit) is opt-in: use `account.RedirectPolicies` / `account.EdgePoliciesWithRedirects`, `presets.Row.RedirectZones`, or `tokensplit.Inputs.RedirectZones`. `ZonePolicies`, `EdgePolicies` and a default `zone` preset keep their existing rights, and only the listed zones get the grant. Keep a zone listed until its last redirect ruleset has been deleted: the same grant authorizes the delete.
+
 ## v4.5.1
 
 - Dependency updates.

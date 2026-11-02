@@ -1,7 +1,8 @@
 // Package zone applies the handful of zone-level settings an estate
 // actually decides: how Cloudflare talks to the origin, the floor it will
-// negotiate with a browser, and whether every proxied hostname gets a
-// certificate without anyone asking for one.
+// negotiate with a browser, whether every proxied hostname gets a
+// certificate without anyone asking for one, the DNS records (including
+// DNS-only child-zone NS delegations), and canonical-host Single Redirects.
 //
 // This is deliberately small. A Cloudflare zone has scores of settings and
 // most are defaults nobody should be managing from a deployment tool; the
@@ -82,6 +83,11 @@ type (
 	Records = zonespec.Records
 	// Record is one of them. See zonespec.Record.
 	Record = zonespec.Record
+	// Redirects is the zone's canonical-host Single Redirects phase. See
+	// zonespec.Redirects.
+	Redirects = zonespec.Redirects
+	// Redirect is one of them. See zonespec.Redirect.
+	Redirect = zonespec.Redirect
 	// Args is one zone's settings. See zonespec.Args.
 	Args = zonespec.Args
 	// RateLimits is the zone's whole http_ratelimit ruleset. See
@@ -129,9 +135,9 @@ type (
 // "setting-<name>-min-tls-version", "setting-<name>-browser-cache-ttl",
 // "setting-<name>-always-use-https", "setting-<name>-security-header",
 // "total-tls-<name>", "cache-rules-<name>", "firewall-custom-<name>",
-// "firewall-managed-<name>", "ratelimit-<name>" and one "record-<name>-..."
-// per record (RecordName), a documented contract: consumers alias existing
-// resources onto these names.
+// "firewall-managed-<name>", "ratelimit-<name>", "redirect-rules-<name>"
+// and one "record-<name>-..." per record (RecordName), a documented
+// contract: consumers alias existing resources onto these names.
 func New(ctx *pulumi.Context, name string, args Args, opts ...pulumi.ResourceOption) (*Zone, error) {
 	if err := args.Validate(); err != nil {
 		return nil, err
@@ -236,7 +242,8 @@ func New(ctx *pulumi.Context, name string, args Args, opts ...pulumi.ResourceOpt
 		}
 	}
 
-	if err := newRulesets(ctx, name, &args, zoneID, child); err != nil {
+	rulesets, err := newRulesets(ctx, name, &args, zoneID, child)
+	if err != nil {
 		return nil, err
 	}
 
@@ -267,7 +274,17 @@ func New(ctx *pulumi.Context, name string, args Args, opts ...pulumi.ResourceOpt
 				rArgs.Comment = pulumi.String(r.Comment)
 			}
 
-			if _, err := cloudflare.NewDnsRecord(ctx, RecordName(name, r), rArgs, child...); err != nil {
+			// The explicit rule-before-proxy dependency: a proxied source
+			// record of a declared redirect waits for the redirect
+			// ruleset's apply. A DNS-only source stages the rule inert and
+			// needs no dependency.
+			recordOpts := child
+			if r.Proxied && rulesets.redirect != nil && args.Redirects.HasSource(r.Name) {
+				recordOpts = append(append([]pulumi.ResourceOption(nil), child...),
+					pulumi.DependsOn([]pulumi.Resource{rulesets.redirect}))
+			}
+
+			if _, err := cloudflare.NewDnsRecord(ctx, RecordName(name, r), rArgs, recordOpts...); err != nil {
 				return nil, fmt.Errorf("zone %q: record %s %s: %w", name, r.Name, r.Type, err)
 			}
 		}
@@ -302,8 +319,8 @@ func hstsValue(h *HSTS) pulumi.Map {
 
 // RecordName is the child name of one record: "record-<name>-<host-slug>-cname"
 // for a CNAME (one per name), and "record-<name>-<host-slug>-<type>-<content-slug>"
-// for an A or AAAA (several may share a name). A documented contract, like
-// the other child names.
+// for an A, AAAA or NS (several may share a name; an NS set is one per
+// target). A documented contract, like the other child names.
 func RecordName(name string, r *Record) string {
 	out := "record-" + name + "-" + recordSlug(r.Name) + "-" + strings.ToLower(r.Type)
 	if r.Type != "CNAME" {

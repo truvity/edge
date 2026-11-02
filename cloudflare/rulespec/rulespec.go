@@ -51,13 +51,26 @@ type ExecuteParams struct {
 	ID string
 }
 
+// RedirectParams are the action parameters of redirect (a Single Redirect
+// in the http_request_dynamic_redirect phase).
+type RedirectParams struct {
+	// TargetURL is the Rules-language expression the redirect targets, for
+	// example concat("https://example.com", http.request.uri.path).
+	TargetURL string
+	// StatusCode is the redirect status: 301, 302, 307 or 308.
+	StatusCode int
+	// PreserveQueryString keeps the request's query string.
+	PreserveQueryString bool
+}
+
 // Params are the action parameters of a rule. At most one member is set,
 // the one its Action takes.
 type Params struct {
-	Cache   *CacheParams
-	Config  *ConfigParams
-	Skip    *SkipParams
-	Execute *ExecuteParams
+	Cache    *CacheParams
+	Config   *ConfigParams
+	Skip     *SkipParams
+	Execute  *ExecuteParams
+	Redirect *RedirectParams
 }
 
 // RateLimit is the rate limiting block of a rule in the http_ratelimit phase.

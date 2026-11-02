@@ -49,11 +49,12 @@ func newChildTokenMocks() *childTokenMocks {
 			// The preset-only permission groups (account.EdgePolicies,
 			// account.R2AdminPolicies): real Cloudflare API names, per
 			// CL1a's own citation, not the dashboard's "Edit" label.
-			"Cloudflare Tunnel Write":    {"group-tunnel-write-id"},
-			"SSL and Certificates Write": {"group-ssl-write-id"},
-			"Cache Settings Write":       {"group-cache-settings-write-id"},
-			"Config Settings Write":      {"group-config-settings-write-id"},
-			"Workers R2 Storage Write":   {"group-r2-admin-write-id"},
+			"Cloudflare Tunnel Write":     {"group-tunnel-write-id"},
+			"SSL and Certificates Write":  {"group-ssl-write-id"},
+			"Cache Settings Write":        {"group-cache-settings-write-id"},
+			"Config Settings Write":       {"group-config-settings-write-id"},
+			"Dynamic URL Redirects Write": {"group-dynamic-url-redirects-write-id"},
+			"Workers R2 Storage Write":    {"group-r2-admin-write-id"},
 		},
 	}
 }

@@ -13,6 +13,8 @@ package zonespec
 import (
 	"fmt"
 	"net/netip"
+	"net/url"
+	"regexp"
 	"slices"
 	"sort"
 	"strings"
@@ -251,6 +253,10 @@ type (
 		// a tunnel (a load balancer, a CDN). Nil, or no entries, manages
 		// no record; records not listed here are never touched.
 		Records *Records `json:"records,omitempty" yaml:"records,omitempty"`
+		// Redirects are the zone's canonical-host Single Redirects: the
+		// whole http_request_dynamic_redirect phase. Nil, or no entries,
+		// leaves the phase alone; a block owns it.
+		Redirects *Redirects `json:"redirects,omitempty" yaml:"redirects,omitempty"`
 		// AlwaysUseHTTPS is the zone setting always_use_https: true
 		// answers every plain-HTTP request with a redirect to HTTPS,
 		// false turns that off. Nil leaves the setting alone.
@@ -299,26 +305,79 @@ type (
 	// Record is one DNS record.
 	Record struct {
 		// Name is the record's lower-case hostname inside the zone; a
-		// leading "*." makes it a wildcard.
+		// leading "*." makes it a wildcard. An NS record is a child-zone
+		// delegation owner: an exact name below the zone, never the apex
+		// and never a wildcard.
 		Name string `json:"name" yaml:"name"`
-		// Type is A, AAAA or CNAME: the types Cloudflare can proxy.
+		// Type is A, AAAA, CNAME or NS. NS is DNS-only: it delegates a
+		// child zone and takes no proxy, WAF or certificate.
 		Type string `json:"type" yaml:"type"`
-		// Content is the IPv4 address (A), IPv6 address (AAAA) or
-		// lower-case target hostname without a trailing dot (CNAME).
+		// Content is the IPv4 address (A), IPv6 address (AAAA), or the
+		// lower-case target hostname without a trailing dot (CNAME and
+		// NS). An NS content is one nameserver hostname; the same owner
+		// may carry several, each its own record.
 		Content string `json:"content" yaml:"content"`
 		// Proxied serves the name through Cloudflare's edge (orange
-		// cloud); false answers DNS only.
+		// cloud); false answers DNS only. NS is always DNS only.
 		Proxied bool `json:"proxied,omitempty" yaml:"proxied,omitempty"`
 		// WAF says whether a proxied record's name is covered by the
 		// zone's derived managed WAF. Nil is on; only false opts the name
-		// out (WAFCovered). Meaningless on a DNS-only record.
+		// out (WAFCovered). Meaningless on a DNS-only record, and refused
+		// on NS.
 		WAF *bool `json:"waf,omitempty" yaml:"waf,omitempty"`
 		// TTL in seconds for a DNS-only record, 60 to 86400; 0 is
 		// Cloudflare's automatic TTL. A proxied record is always
-		// automatic, so it must leave TTL at 0.
+		// automatic, so it must leave TTL at 0. An NS record needs an
+		// explicit TTL, and every target of one owner shares it.
 		TTL int `json:"ttl,omitempty" yaml:"ttl,omitempty"`
 		// Comment is shown beside the record in the dashboard.
 		Comment string `json:"comment,omitempty" yaml:"comment,omitempty"`
+	}
+
+	// Redirects is a zone's canonical-host redirects: the WHOLE
+	// http_request_dynamic_redirect phase. Nil or no entries leaves the phase
+	// unmanaged; a block owns it, so a rule added in the dashboard is
+	// replaced. A zone has one entry point ruleset per phase: adopt an
+	// existing one with Args.ImportRulesets rather than creating a second.
+	//
+	// Each match is exactly one host, on HTTP and HTTPS and every path. The
+	// redirect answers with To plus the request's path and, by default, its
+	// query string. It needs no regex and no WAF feature.
+	Redirects struct {
+		// Zone is the zone's domain ("example.com"). Required when Entries
+		// is not empty: every From must be the zone itself or a name inside
+		// it.
+		Zone string `json:"zone,omitempty" yaml:"zone,omitempty"`
+		// Entries are the redirects, in any order. They are rendered sorted
+		// by From, then Ref, so the plan never depends on authoring order.
+		Entries []Redirect `json:"entries" yaml:"entries"`
+	}
+
+	// Redirect is one exact-host redirect. Its expression is
+	// http.host eq From; it therefore covers HTTP and HTTPS, and every
+	// path.
+	Redirect struct {
+		// Ref is the rule's stable ref, unique in the phase
+		// (www_to_apex). A hand-made rule's ref is preserved when its
+		// ruleset is adopted with Args.ImportRulesets.
+		Ref string `json:"ref" yaml:"ref"`
+		// From is the exact lower-case source hostname inside Zone. No
+		// wildcard, no scheme, no path.
+		From string `json:"from" yaml:"from"`
+		// To is the HTTPS destination origin: https://<host>, with no
+		// path, port, query or fragment. The request's path is appended
+		// to it, so the destination keeps the path.
+		To string `json:"to" yaml:"to"`
+		// Status is the redirect status: 301 (the default), 302, 307 or
+		// 308.
+		Status int `json:"status,omitempty" yaml:"status,omitempty"`
+		// PreserveQueryString keeps the request's query string. Nil
+		// means true.
+		PreserveQueryString *bool `json:"preserveQueryString,omitempty" yaml:"preserveQueryString,omitempty"`
+		// Disabled keeps the rule and its ref while making it inert: the
+		// staged rollback (restore the source DNS, then disable the
+		// rule, then remove it) does not have to delete the ruleset.
+		Disabled bool `json:"disabled,omitempty" yaml:"disabled,omitempty"`
 	}
 )
 
@@ -327,7 +386,7 @@ type (
 func (r Record) WAFCovered() bool { return r.Proxied && (r.WAF == nil || *r.WAF) }
 
 // Record types Records accepts, and the DNS-only TTL range.
-var validRecordTypes = []string{"A", "AAAA", "CNAME"}
+var validRecordTypes = []string{"A", "AAAA", "CNAME", "NS"}
 
 const (
 	minRecordTTL = 60
@@ -341,7 +400,8 @@ func (r *Records) Managed() bool {
 
 // validate reports the first problem with a records block: a name outside
 // the zone, content that does not fit its type, or two records Cloudflare
-// would refuse to hold together (a CNAME shares its name with nothing).
+// would refuse to hold together (a CNAME shares its name with nothing, and
+// an NS delegation is the only record set at its owner).
 func (r *Records) validate(zoneID string) error {
 	if !r.Managed() {
 		return nil
@@ -354,6 +414,8 @@ func (r *Records) validate(zoneID string) error {
 	seen := map[string]struct{}{}
 	cname := map[string]bool{}
 	named := map[string]bool{}
+	nsOwner := map[string]bool{}
+	nsTTL := map[string]int{}
 
 	for i := range r.Entries {
 		e := &r.Entries[i]
@@ -371,6 +433,42 @@ func (r *Records) validate(zoneID string) error {
 
 		if err := validateRecordContent(e.Type, e.Content); err != nil {
 			return fmt.Errorf("%s: %w", where, err)
+		}
+
+		if e.Type == "NS" {
+			if strings.Contains(e.Name, "*") {
+				return fmt.Errorf("%s: a child-zone delegation cannot be a wildcard; NS owners are exact names", where)
+			}
+
+			if e.Name == r.Zone {
+				return fmt.Errorf("%s: the zone apex's NS set is Cloudflare's own; a child-zone delegation must be a name below %s", where, r.Zone)
+			}
+
+			if e.Proxied {
+				return fmt.Errorf("%s: an NS delegation is DNS only; leave proxied false", where)
+			}
+
+			if e.WAF != nil {
+				return fmt.Errorf("%s: an NS delegation is not in the managed WAF; remove waf", where)
+			}
+
+			if e.TTL < minRecordTTL || e.TTL > maxRecordTTL {
+				return fmt.Errorf("%s: an NS record needs an explicit ttl (%d to %d); automatic TTL is not a delegation", where, minRecordTTL, maxRecordTTL)
+			}
+
+			if prev, ok := nsTTL[e.Name]; ok && prev != e.TTL {
+				return fmt.Errorf("%s: this NS set's ttl %d disagrees with %d set by an earlier target: one owner's targets share a ttl", where, e.TTL, prev)
+			}
+
+			nsTTL[e.Name] = e.TTL
+
+			if named[e.Name] && !nsOwner[e.Name] {
+				return fmt.Errorf("%s: an NS delegation cannot share its name with another record", where)
+			}
+
+			nsOwner[e.Name] = true
+		} else if nsOwner[e.Name] {
+			return fmt.Errorf("%s: an NS delegation cannot share its name with another record", where)
 		}
 
 		if e.Proxied && e.TTL != 0 {
@@ -407,10 +505,19 @@ func validateRecordContent(typ, content string) error {
 		if err != nil || addr.Is4() != (typ == "A") || addr.Zone() != "" {
 			return fmt.Errorf("content %q is not an IPv%s address", content, map[bool]string{true: "4", false: "6"}[typ == "A"])
 		}
-	case "CNAME":
+	case "CNAME", "NS":
+		what := "target hostname"
+		if typ == "NS" {
+			what = "nameserver hostname"
+
+			if _, err := netip.ParseAddr(content); err == nil {
+				return fmt.Errorf("content %q must be a lower-case %s without a trailing dot, not an address", content, what)
+			}
+		}
+
 		if content == "" || content != strings.ToLower(content) || strings.HasSuffix(content, ".") ||
 			strings.ContainsAny(content, `*/:"\ `) || !strings.Contains(content, ".") {
-			return fmt.Errorf("content %q must be a lower-case hostname without a trailing dot", content)
+			return fmt.Errorf("content %q must be a lower-case %s without a trailing dot", content, what)
 		}
 	}
 
@@ -425,6 +532,152 @@ func oneOf(value string, allowed []string) bool {
 	}
 
 	return false
+}
+
+// redirectRefPattern is a stable rule ref: lowercase, starting with a letter,
+// never longer than Cloudflare's own limit.
+var redirectRefPattern = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,63}$`)
+
+// redirectStatuses are the statuses a Single Redirect takes.
+var redirectStatuses = []int{301, 302, 307, 308}
+
+// Managed reports whether r declares any redirect. Nil and an empty block
+// manage no phase.
+func (r *Redirects) Managed() bool {
+	return r != nil && len(r.Entries) > 0
+}
+
+// HasSource reports whether host is one of the block's exact source hosts.
+// It is what the zone component uses to make a proxied source record wait
+// for the redirect ruleset.
+func (r *Redirects) HasSource(host string) bool {
+	if r == nil {
+		return false
+	}
+
+	for i := range r.Entries {
+		if r.Entries[i].From == host {
+			return true
+		}
+	}
+
+	return false
+}
+
+// validate reports the first problem with a redirects block: a source host
+// outside the zone or a wildcard, a destination that is not an HTTPS origin,
+// a repeated ref or source, an unsupported status, or a loop between the
+// declared redirects.
+func (r *Redirects) validate(zoneID string) error {
+	if !r.Managed() {
+		return nil
+	}
+
+	if r.Zone == "" || r.Zone != strings.ToLower(r.Zone) {
+		return fmt.Errorf("zone %q: redirects.zone must be the zone's lower-case domain", zoneID)
+	}
+
+	refs := map[string]int{}
+	froms := map[string]int{}
+	destinations := map[string]string{}
+
+	for i := range r.Entries {
+		e := &r.Entries[i]
+		where := fmt.Sprintf("zone %q: redirects.entries[%d] %s", zoneID, i, e.Ref)
+
+		if !redirectRefPattern.MatchString(e.Ref) {
+			return fmt.Errorf("%s: ref must be lowercase letters, digits, \"_\" or \"-\", start with a letter and be at most 64 characters", where)
+		}
+
+		if prev, dup := refs[e.Ref]; dup {
+			return fmt.Errorf("%s: ref is already used by entry %d: a ref is stable and unique in the phase", where, prev)
+		}
+
+		refs[e.Ref] = i
+
+		if e.From == "" || e.From != strings.ToLower(e.From) || strings.HasSuffix(e.From, ".") ||
+			strings.ContainsAny(e.From, `*/:"\ `) || (e.From != r.Zone && !strings.HasSuffix(e.From, "."+r.Zone)) {
+			return fmt.Errorf("%s.from: %q must be a lower-case exact hostname inside %s (no wildcard)", where, e.From, r.Zone)
+		}
+
+		if prev, dup := froms[e.From]; dup {
+			return fmt.Errorf("%s.from: %q is already used by entry %d: one redirect per source host", where, e.From, prev)
+		}
+
+		froms[e.From] = i
+
+		dest, err := validateRedirectTo(e.To)
+		if err != nil {
+			return fmt.Errorf("%s.to: %w", where, err)
+		}
+
+		destinations[e.From] = dest
+
+		if e.Status != 0 && !slices.Contains(redirectStatuses, e.Status) {
+			return fmt.Errorf("%s.status: %d is not a redirect status (valid: %v)", where, e.Status, redirectStatuses)
+		}
+	}
+
+	for i := range r.Entries {
+		start := r.Entries[i].From
+		if loop := redirectLoop(start, destinations); len(loop) > 0 {
+			return fmt.Errorf("zone %q: redirects: %s", zoneID, strings.Join(loop, " -> "))
+		}
+	}
+
+	return nil
+}
+
+// redirectLoop walks the declared source-to-destination graph from start and
+// returns the cycle it enters, or nil. A destination that is not another
+// declared source ends the walk: that request leaves the declaration.
+func redirectLoop(start string, destinations map[string]string) []string {
+	seen := map[string]bool{start: true}
+	path := []string{start}
+	cur := start
+
+	for {
+		dest, ok := destinations[cur]
+		if !ok {
+			return nil
+		}
+
+		path = append(path, dest)
+
+		if seen[dest] {
+			return append(path, "redirect loop")
+		}
+
+		seen[dest] = true
+		cur = dest
+	}
+}
+
+// validateRedirectTo holds a destination to an HTTPS origin and returns its
+// host: https://<host>, with no path, port, query or fragment. The request's
+// path is appended to it by the rule, so a path here would be duplicated.
+func validateRedirectTo(to string) (string, error) {
+	u, err := url.Parse(to)
+	if err != nil {
+		return "", fmt.Errorf("%q is not a URL", to)
+	}
+
+	if u.Scheme != "https" {
+		return "", fmt.Errorf("%q must be an HTTPS destination (https://<host>)", to)
+	}
+
+	if u.User != nil || u.Port() != "" || u.Path != "" || u.RawPath != "" || u.RawQuery != "" ||
+		u.ForceQuery || u.Fragment != "" || u.Opaque != "" {
+		return "", fmt.Errorf("%q must be an HTTPS origin (https://<host>) with no path, port, query or fragment", to)
+	}
+
+	host := u.Hostname()
+	if host == "" || host != strings.ToLower(host) || strings.HasSuffix(host, ".") ||
+		strings.ContainsAny(host, `*/:"\ `) || !strings.Contains(host, ".") {
+		return "", fmt.Errorf("%q must name a lower-case hostname", to)
+	}
+
+	return host, nil
 }
 
 // Validate reports the first problem with args.
@@ -470,6 +723,10 @@ func (a *Args) Validate() error {
 		return err
 	}
 
+	if err := a.Redirects.validate(a.ZoneID); err != nil {
+		return err
+	}
+
 	if a.HSTS != nil {
 		if err := a.HSTS.validate(a.ZoneID, a.AlwaysUseHTTPS); err != nil {
 			return err
@@ -494,8 +751,10 @@ func (a *Args) Validate() error {
 		}
 	}
 
-	if a.SSL == "" && a.MinTLSVersion == "" && a.TotalTLS == nil && a.Cache == nil && !a.TrustedClients.Managed() &&
-		!a.RateLimits.Managed() && !a.Records.Managed() && a.AlwaysUseHTTPS == nil && a.HSTS == nil && !a.ManagedWAF.Managed() && a.BotManagement == nil &&
+	if a.SSL == "" && a.MinTLSVersion == "" && a.TotalTLS == nil && a.Cache == nil &&
+		!a.TrustedClients.Managed() && !a.RateLimits.Managed() && !a.Records.Managed() &&
+		!a.Redirects.Managed() && a.AlwaysUseHTTPS == nil && a.HSTS == nil &&
+		!a.ManagedWAF.Managed() && a.BotManagement == nil &&
 		a.AuthenticatedOriginPulls == nil && len(a.Contributions) == 0 {
 		return fmt.Errorf("zone %q: nothing to apply — omit the zone instead of declaring one that manages no setting", a.ZoneID)
 	}

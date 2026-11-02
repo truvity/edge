@@ -7,8 +7,9 @@
 // what the other reaches. The root mints, per account,
 //
 //   - "edge": whole-account tunnel write, plus DNS, SSL, zone settings,
-//     cache settings and config settings write on the account's zones (and Zone WAF Write on
-//     one named zone, when asked), for the stack that owns tunnels, DNS
+//     cache settings and config settings write on the account's zones (and
+//     Zone WAF Write on one named zone / Dynamic URL Redirects Write on
+//     Inputs.RedirectZones, when asked), for the stack that owns tunnels, DNS
 //     and zone settings;
 //   - "status": whole-account tunnel write plus DNS write on the zones,
 //     for a status stack that needs no SSL, settings or cache;
@@ -60,6 +61,10 @@ const (
 	// PermConfigSettingsWrite is the zone's Configuration Rules (the
 	// http_config_settings phase); the dashboard calls it "Config Rules: Edit".
 	PermConfigSettingsWrite = "Config Settings Write"
+	// PermDynamicRedirectsWrite is the zone's Single Redirects (the
+	// http_request_dynamic_redirect phase); the dashboard calls it
+	// "Single Redirect > Edit".
+	PermDynamicRedirectsWrite = "Dynamic URL Redirects Write"
 	// PermWorkersR2StorageWrite creates and administers R2 buckets.
 	PermWorkersR2StorageWrite = "Workers R2 Storage Write"
 	// PermWorkersR2StorageBucketItemWrite is the bucket-scope grade: object
@@ -144,6 +149,12 @@ type (
 		// gets Zone WAF Write on. Empty, or a zone the edge child cannot
 		// reach, grants none.
 		WAFZone string
+		// RedirectZones names the zones (Zone.Name) the edge child
+		// additionally gets Dynamic URL Redirects Write on. Each must be a
+		// managed (not security.txt-only) zone of AccountID. Empty grants
+		// none; keep a zone here until its last redirect ruleset has been
+		// deleted, because the same grant authorizes the delete.
+		RedirectZones []string
 		// WithoutR2Admin mints no r2-admin child: an account that owns no
 		// R2 buckets has no stack to administer them, so nothing should
 		// hold that power. Its r2-parent children follow Buckets as before.
@@ -175,11 +186,18 @@ func Deploy(ctx *pulumi.Context, logger *slog.Logger, in Inputs) error {
 			"no zone belongs to account %s (the root token's own account): nothing to scope edge/status to", in.AccountID)
 	}
 
+	redirectIDs, err := RedirectZoneIDs(in.Zones, in.AccountID, zoneIDs, in.RedirectZones)
+	if err != nil {
+		return fmt.Errorf("redirect zones: %w", err)
+	}
+
 	cfgs := map[string]account.ChildTokenConfig{
 		ChildEdge: {
 			Name:     tokenNamePrefix + ChildEdge,
 			Rotation: in.Rotation.Edge,
-			Policies: append(EdgePolicies(in.Zones, zoneIDs, in.WAFZone), account.SecurityTxtPolicies(txtIDs...)...),
+			Policies: append(
+				EdgePoliciesWithRedirects(in.Zones, zoneIDs, in.WAFZone, redirectIDs),
+				account.SecurityTxtPolicies(txtIDs...)...),
 		},
 		ChildStatus: {
 			Name:     tokenNamePrefix + ChildStatus,
@@ -295,6 +313,64 @@ func EdgePolicies(zones []Zone, zoneIDs []string, wafZone string) []account.Chil
 	}
 
 	return account.EdgePoliciesWithWAF(wafZoneIDs, zoneIDs...)
+}
+
+// EdgePoliciesWithRedirects is EdgePolicies plus one Dynamic URL Redirects
+// Write policy per entry of redirectZoneIDs. redirectZoneIDs must already be
+// managed zone ids (RedirectZoneIDs maps names to them); EdgePolicies itself
+// never grants the redirect group.
+func EdgePoliciesWithRedirects(zones []Zone, zoneIDs []string, wafZone string, redirectZoneIDs []string) []account.ChildTokenPolicy {
+	policies := EdgePolicies(zones, zoneIDs, wafZone)
+
+	return append(policies, account.RedirectPolicies(redirectZoneIDs...)...)
+}
+
+// RedirectZoneIDs maps explicit redirect zone names to the ids of the edge
+// child's managed zones. A name that is not a zone of accountID, is
+// security.txt-only, or is not one of zoneIDs is refused, and so is a
+// repeated name. The returned ids keep the input order, which is the policy
+// order. Empty names return nil.
+func RedirectZoneIDs(zones []Zone, accountID string, zoneIDs []string, names []string) ([]string, error) {
+	out := make([]string, 0, len(names))
+	seen := map[string]bool{}
+
+	for _, name := range names {
+		if seen[name] {
+			return nil, fmt.Errorf("zone %q is listed twice", name)
+		}
+
+		seen[name] = true
+
+		found := false
+
+		for _, z := range zones {
+			if z.Name != name {
+				continue
+			}
+
+			found = true
+
+			if z.AccountID == "" || z.AccountID != accountID {
+				return nil, fmt.Errorf("zone %q is not in the account this split serves", name)
+			}
+
+			if z.SecurityTxtOnly {
+				return nil, fmt.Errorf("zone %q is managed for its security.txt only and cannot manage redirects", name)
+			}
+
+			if !slices.Contains(zoneIDs, z.ID) {
+				return nil, fmt.Errorf("zone %q is not a managed zone of the edge child", name)
+			}
+
+			out = append(out, z.ID)
+		}
+
+		if !found {
+			return nil, fmt.Errorf("zone %q is in none of the declared zones", name)
+		}
+	}
+
+	return out, nil
 }
 
 // StatusPolicies is the status child's own grant: the account-wide tunnel

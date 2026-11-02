@@ -1,6 +1,7 @@
 package zone
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -140,4 +141,26 @@ func TestValidateRecords(t *testing.T) {
 			assert.Contains(t, err.Error(), tc.want)
 		})
 	}
+}
+
+// TestOnlyListedRecordsAreRegistered proves the inverse of unlisted-record
+// survival: the zone component registers a record for each listed row and
+// nothing else, so a record the file does not name is not in the program and
+// cannot be changed by the zone stack.
+func TestOnlyListedRecordsAreRegistered(t *testing.T) {
+	m := run(t, Args{ZoneID: "zone-1", Records: &Records{
+		Zone: "example.com",
+		Entries: []Record{
+			{Name: "listed.example.com", Type: "CNAME", Content: "origin.example.net", TTL: 300},
+		},
+	}})
+
+	var got []string
+	for key := range m.res {
+		if strings.HasPrefix(key, dnsRecordType+"/") {
+			got = append(got, key)
+		}
+	}
+
+	assert.Equal(t, []string{dnsRecordType + "/record-example-listed-example-com-cname"}, got)
 }

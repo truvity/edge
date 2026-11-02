@@ -70,6 +70,18 @@ func contributions(args *Args) ([]cfrules.Contribution, builtins, error) {
 		add(c, true)
 	}
 
+	if args.Redirects.Managed() {
+		c, err := cfrules.Redirects(args.Redirects)
+		if err != nil {
+			return nil, nil, fmt.Errorf("redirects: %w", err)
+		}
+
+		// Not a builtin: a redirect keeps its stable ref and its enabled
+		// flag in the provider's rule, so an adopted ruleset's refs are
+		// preserved.
+		out = append(out, c)
+	}
+
 	return append(out, args.Contributions...), known, nil
 }
 
@@ -87,29 +99,40 @@ func rulesetChild(phase cfrules.Phase, name string) string {
 		return "ratelimit-" + name
 	case cfrules.PhaseConfigSettings:
 		return "ssl-mode-" + name
+	case cfrules.PhaseDynamicRedirect:
+		return "redirect-rules-" + name
 	default:
 		return "ruleset-" + string(phase) + "-" + name
 	}
 }
 
+// rulesetResources are the phase resources a later part of the zone needs
+// by identity. Only the dynamic redirect phase is needed today: a proxied
+// DNS record of one of its source hosts must wait for it.
+type rulesetResources struct {
+	redirect *cloudflare.Ruleset
+}
+
 // newRulesets assembles every contribution and registers one ruleset per
 // phase that has any.
-func newRulesets(ctx *pulumi.Context, name string, args *Args, zoneID pulumi.String, child []pulumi.ResourceOption) error {
+func newRulesets(ctx *pulumi.Context, name string, args *Args, zoneID pulumi.String, child []pulumi.ResourceOption) (rulesetResources, error) {
 	contribs, known, err := contributions(args)
 	if err != nil {
-		return fmt.Errorf("zone %q: %w", name, err)
+		return rulesetResources{}, fmt.Errorf("zone %q: %w", name, err)
 	}
 
 	assembled, err := cfrules.Assemble(contribs)
 	if err != nil {
-		return fmt.Errorf("zone %q: %w", name, err)
+		return rulesetResources{}, fmt.Errorf("zone %q: %w", name, err)
 	}
 
 	for phase, id := range args.ImportRulesets {
 		if _, ok := assembled[phase]; !ok {
-			return fmt.Errorf("zone %q: importRulesets: the zone manages no %s ruleset to import %q into", name, phase, id)
+			return rulesetResources{}, fmt.Errorf("zone %q: importRulesets: the zone manages no %s ruleset to import %q into", name, phase, id)
 		}
 	}
+
+	var resources rulesetResources
 
 	for _, phase := range cfrules.Phases() {
 		list, ok := assembled[phase]
@@ -130,18 +153,23 @@ func newRulesets(ctx *pulumi.Context, name string, args *Args, zoneID pulumi.Str
 			out = append(out, providerRule(&list[i], builtin, enabled))
 		}
 
-		if _, err := cloudflare.NewRuleset(ctx, rulesetChild(phase, name), &cloudflare.RulesetArgs{
+		registered, err := cloudflare.NewRuleset(ctx, rulesetChild(phase, name), &cloudflare.RulesetArgs{
 			ZoneId: zoneID,
 			Kind:   pulumi.String(rulesetKind),
 			Phase:  pulumi.String(string(phase)),
 			Name:   pulumi.String("default"),
 			Rules:  out,
-		}, opts...); err != nil {
-			return fmt.Errorf("zone %q: %s: %w", name, phase, err)
+		}, opts...)
+		if err != nil {
+			return rulesetResources{}, fmt.Errorf("zone %q: %s: %w", name, phase, err)
+		}
+
+		if phase == cfrules.PhaseDynamicRedirect {
+			resources.redirect = registered
 		}
 	}
 
-	return nil
+	return resources, nil
 }
 
 // providerRule maps a rule onto the provider's. A built-in rule keeps the
@@ -234,6 +262,18 @@ func actionParameters(p *cfrules.Params) *cloudflare.RulesetRuleActionParameters
 		return out
 	case p.Execute != nil:
 		return &cloudflare.RulesetRuleActionParametersArgs{Id: pulumi.String(p.Execute.ID)}
+	case p.Redirect != nil:
+		r := p.Redirect
+
+		return &cloudflare.RulesetRuleActionParametersArgs{
+			FromValue: &cloudflare.RulesetRuleActionParametersFromValueArgs{
+				PreserveQueryString: pulumi.Bool(r.PreserveQueryString),
+				StatusCode:          pulumi.Int(r.StatusCode),
+				TargetUrl: cloudflare.RulesetRuleActionParametersFromValueTargetUrlArgs{
+					Expression: pulumi.String(r.TargetURL),
+				},
+			},
+		}
 	}
 
 	return nil

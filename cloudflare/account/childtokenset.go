@@ -85,15 +85,21 @@ func NewChildTokenSet(
 // EdgePolicies is the policy set for a "manage zones and run a tunnel"
 // child: account-wide Cloudflare Tunnel management, plus DNS, SSL and
 // Certificates, Zone Settings, Cache Settings and Config Settings on each
-// zone in zoneIDs — the exact grant an estate's own edge stack (cloudflare/zone
-// plus cloudflare/tunnel, scoped by account.Use()) needs to run as, and nothing
-// more. See docs/cloudflare/layout.md#recommended-layout for where this fits.
+// zone in zoneIDs — the exact grant an estate's own edge stack
+// (cloudflare/zone plus cloudflare/tunnel, scoped by account.Use()) needs to
+// run as, and nothing more. See docs/cloudflare/layout.md#recommended-layout
+// for where this fits.
 //
 // "Config Settings Write" is the dashboard's "Config Rules: Edit": the
 // zone's http_config_settings phase, where Configuration Rules live (a
 // per-hostname SSL mode, say). Without it the token cannot even read that
 // phase's entrypoint ruleset (403), so an edge stack could neither declare
 // nor adopt one.
+//
+// Single Redirects are opt-in: EdgePolicies never includes Dynamic URL
+// Redirects Write. Add it for the zones that manage redirects with
+// EdgePoliciesWithRedirects or RedirectPolicies, so a token for a zone with
+// no redirects keeps the narrower baseline.
 //
 // The permission-group names here are Cloudflare's own API names, which
 // use "Write"/"Read" — confirmed live against the account's own
@@ -116,14 +122,56 @@ func EdgePolicies(zoneIDs ...string) []ChildTokenPolicy {
 // ZonePolicies is EdgePolicies without the account-wide Cloudflare Tunnel
 // Write: DNS, SSL and Certificates, Zone Settings, Cache Settings and Config
 // Settings Write on each zone in zoneIDs, in order. It is the grant of the
-// per-company zone stack; the services stack's tunnels need the tunnel write
-// (tokensplit.StatusPolicies). No zones returns nil.
+// per-company zone stack; the services stack's tunnels need the tunnel
+// write (tokensplit.StatusPolicies). No zones returns nil.
+//
+// Single Redirects are not in this baseline. A zone that manages them gets
+// one more policy from RedirectPolicies, so adding a redirect to one zone
+// never widens the token for the others.
 func ZonePolicies(zoneIDs ...string) []ChildTokenPolicy {
 	var policies []ChildTokenPolicy
 
 	for _, zoneID := range zoneIDs {
 		policies = append(policies, ChildTokenPolicy{
-			PermissionGroups: []string{"DNS Write", "SSL and Certificates Write", "Zone Settings Write", "Cache Settings Write", "Config Settings Write"},
+			PermissionGroups: []string{
+				"DNS Write", "SSL and Certificates Write", "Zone Settings Write",
+				"Cache Settings Write", "Config Settings Write",
+			},
+			Scope: ZoneScope{ZoneID: zoneID},
+		})
+	}
+
+	return policies
+}
+
+// EdgePoliciesWithRedirects is EdgePolicies plus one "Dynamic URL Redirects
+// Write" policy per entry of redirectZoneIDs, in order. redirectZoneIDs is
+// independent of zoneIDs (nothing is cross-checked), so list a zone in both
+// when the same token also manages its DNS, settings and cache. An empty
+// redirectZoneIDs returns EdgePolicies(zoneIDs...) unchanged: the redirect
+// grant is strictly opt-in. Append RedirectPolicies for WAF-plus-redirect
+// combinations.
+func EdgePoliciesWithRedirects(redirectZoneIDs []string, zoneIDs ...string) []ChildTokenPolicy {
+	policies := EdgePolicies(zoneIDs...)
+
+	return append(policies, RedirectPolicies(redirectZoneIDs...)...)
+}
+
+// RedirectPolicies returns one ZoneScope policy per entry of zoneIDs, in
+// order, each granting only "Dynamic URL Redirects Write" (the dashboard's
+// "Single Redirect > Edit") on that zone. Append it to ZonePolicies or
+// EdgePolicies for the zones that declare redirects. No zones returns nil.
+//
+// Keep the zone in this list until its last redirect ruleset has been
+// deleted: the same grant is what authorizes the delete. Removing the rule
+// and revoking the permission in one change can leave the deletion without
+// its permission.
+func RedirectPolicies(zoneIDs ...string) []ChildTokenPolicy {
+	var policies []ChildTokenPolicy
+
+	for _, zoneID := range zoneIDs {
+		policies = append(policies, ChildTokenPolicy{
+			PermissionGroups: []string{PermDynamicRedirectsWrite},
 			Scope:            ZoneScope{ZoneID: zoneID},
 		})
 	}
@@ -152,6 +200,11 @@ func EdgePoliciesWithWAF(wafZoneIDs []string, zoneIDs ...string) []ChildTokenPol
 
 	return policies
 }
+
+// PermDynamicRedirectsWrite is the permission group cloudflare/zone's
+// Args.Redirects needs to write the zone's Single Redirects phase. The
+// dashboard shows it as "Single Redirect > Edit".
+const PermDynamicRedirectsWrite = "Dynamic URL Redirects Write"
 
 // PermBotManagementWrite is the permission group cloudflare/zone's
 // Args.BotManagement needs to write the zone's bot management setting.

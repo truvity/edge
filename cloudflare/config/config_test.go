@@ -1310,3 +1310,141 @@ func TestCompanyGroupsAccounts(t *testing.T) {
 	assert.Equal(t, "partner", c.CompanyOf("partner"))
 	assert.Equal(t, []string{"partner"}, c.AccountsOf("partner"))
 }
+
+// TestNSRecordsLoadAsDelegations is the config path of a child-zone
+// delegation: four target records for one owner, DNS-only, explicit TTL.
+func TestNSRecordsLoadAsDelegations(t *testing.T) {
+	delegation := "  example.com: {account: platform, zone_id: z1, ssl_mode: full, records: [" +
+		"{name: team.example.com, type: NS, content: ns1.nameservers.example, ttl: 300}, " +
+		"{name: team.example.com, type: NS, content: ns2.nameservers.example, ttl: 300}, " +
+		"{name: team.example.com, type: NS, content: ns3.nameservers.example, ttl: 300}, " +
+		"{name: team.example.com, type: NS, content: ns4.nameservers.example, ttl: 300}]}"
+	withNS := replaceOnce(t, registry, "  example.com: {account: platform, zone_id: z1, ssl_mode: full}", delegation)
+
+	c, err := load(t, withNS, gateways("[platform]", map[string]string{
+		"kernel": "          a: {domains: [a.example.com], route_namespaces: [a]}\n",
+	}))
+	require.NoError(t, err)
+
+	recs := c.Zones["example.com"].RecordsLibrary("example.com")
+	require.Len(t, recs.Entries, 4)
+
+	for i, r := range recs.Entries {
+		assert.Equal(t, "team.example.com", r.Name)
+		assert.Equal(t, "NS", r.Type)
+		assert.Equal(t, 300, r.TTL)
+		assert.False(t, r.Proxied, "a delegation is DNS only")
+		assert.Nil(t, r.WAF, "a delegation is never in the managed WAF")
+		assert.Contains(t, r.Content, "ns"+string(rune('1'+i))+".")
+	}
+}
+
+// TestNSDelegationRefusesTunnelHostsAtOrBelow: the child zone cut would hide
+// a tunnel record exactly at the delegation or anywhere under it.
+func TestNSDelegationRefusesTunnelHostsAtOrBelow(t *testing.T) {
+	delegation := "  example.com: {account: platform, zone_id: z1, ssl_mode: full, records: " +
+		"[{name: team.example.com, type: NS, content: ns1.nameservers.example, ttl: 300}]}"
+	withNS := replaceOnce(t, registry, "  example.com: {account: platform, zone_id: z1, ssl_mode: full}", delegation)
+
+	for name, tc := range map[string]struct {
+		host string
+		want string
+	}{
+		"exact":             {"team.example.com", "at or below this NS delegation"},
+		"descendant":        {"app.team.example.com", "at or below this NS delegation"},
+		"wildcard child":    {"'*.team.example.com'", "at or below this NS delegation"},
+		"another host":      {"other.example.com", ""},
+		"parent of the cut": {"example.com", ""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			c, err := load(t, withNS, gateways("[platform]", map[string]string{
+				"kernel": "          a: {domains: [" + tc.host + "], route_namespaces: [a]}\n",
+			}))
+			if tc.want == "" {
+				require.NoError(t, err)
+				require.NotNil(t, c)
+
+				return
+			}
+
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tc.want)
+		})
+	}
+}
+
+// TestRedirectsLoadAsTheLibrarysRedirects is the config path of a
+// canonical-host redirect.
+func TestRedirectsLoadAsTheLibrarysRedirects(t *testing.T) {
+	block := "  example.com:\n" +
+		"    account: platform\n    zone_id: z1\n    ssl_mode: full\n" +
+		"    redirects:\n" +
+		"      - {ref: www_to_apex, from: www.example.com, to: https://example.com, status: 301, preserve_query_string: true}\n" +
+		"    redirect_rules_import_id: feed0001feed0002feed0003feed0004\n"
+	withRedirect := replaceOnce(t, registry, "  example.com: {account: platform, zone_id: z1, ssl_mode: full}", block)
+
+	c, err := load(t, withRedirect, gateways("[platform]", map[string]string{
+		"kernel": "          a: {domains: [a.example.com], route_namespaces: [a]}\n",
+	}))
+	require.NoError(t, err)
+
+	r := c.Zones["example.com"].RedirectsLibrary("example.com")
+	require.NotNil(t, r)
+	assert.Equal(t, "example.com", r.Zone)
+	require.Len(t, r.Entries, 1)
+	assert.Equal(t, "www_to_apex", r.Entries[0].Ref)
+	assert.Equal(t, "www.example.com", r.Entries[0].From)
+	assert.Equal(t, "https://example.com", r.Entries[0].To)
+	assert.Equal(t, 301, r.Entries[0].Status)
+	require.NotNil(t, r.Entries[0].PreserveQueryString)
+	assert.True(t, *r.Entries[0].PreserveQueryString)
+	assert.Equal(t, "feed0001feed0002feed0003feed0004", c.Zones["example.com"].RedirectRulesImportID)
+}
+
+func TestRedirectAndNSRefusalsAtLoad(t *testing.T) {
+	bad := func(block string) string {
+		return replaceOnce(t, registry, "  example.com: {account: platform, zone_id: z1, ssl_mode: full}", block)
+	}
+
+	for name, tc := range map[string]struct {
+		block string
+		want  string
+	}{
+		"redirect http target": {
+			block: bad("  example.com:\n    account: platform\n    zone_id: z1\n    ssl_mode: full\n" +
+				"    redirects: [{ref: www_to_apex, from: www.example.com, to: http://example.com}]\n"),
+			want: "HTTPS",
+		},
+		"redirect loop": {
+			block: bad("  example.com:\n    account: platform\n    zone_id: z1\n    ssl_mode: full\n" +
+				"    redirects:\n" +
+				"      - {ref: www_to_apex, from: www.example.com, to: https://example.com}\n" +
+				"      - {ref: apex_to_www, from: example.com, to: https://www.example.com}\n"),
+			want: "redirect loop",
+		},
+		"NS WAF reason": {
+			block: bad("  example.com: {account: platform, zone_id: z1, ssl_mode: full, records: " +
+				"[{name: team.example.com, type: NS, content: ns1.nameservers.example, ttl: 300, waf_reason: nope}]}"),
+			want: "no WAF options",
+		},
+		"redirect import without redirects": {
+			block: bad("  example.com: {account: platform, zone_id: z1, ssl_mode: full, " +
+				"redirect_rules_import_id: feed0001feed0002feed0003feed0004}"),
+			want: "nothing would adopt",
+		},
+		"redirect import bad id": {
+			block: bad("  example.com:\n    account: platform\n    zone_id: z1\n    ssl_mode: full\n" +
+				"    redirects: [{ref: www_to_apex, from: www.example.com, to: https://example.com}]\n" +
+				"    redirect_rules_import_id: not-an-id\n"),
+			want: "not a ruleset id",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := load(t, tc.block, gateways("[platform]", map[string]string{
+				"kernel": "          a: {domains: [a.example.com], route_namespaces: [a]}\n",
+			}))
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tc.want)
+		})
+	}
+}
