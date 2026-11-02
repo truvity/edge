@@ -194,9 +194,10 @@ func aopProvider(slug string, p *account.Account) pulumi.ResourceTransformation 
 
 // ZoneArgs maps one zone of the registry onto the zone component's input:
 // SSL mode, browser TLS floor, Total TLS, the cache policy with its derived
-// hosts, the zone's own records, the HTTPS redirect, HSTS, Authenticated
-// Origin Pulls while some host has left its tunnel for another origin, the
-// adopted configuration ruleset, and the rules of the registry's blocks as
+// hosts, the zone's own records and child-zone delegations, canonical-host
+// redirects, the HTTPS redirect, HSTS, Authenticated Origin Pulls while some
+// host has left its tunnel for another origin, the adopted configuration or
+// redirect ruleset, and the rules of the registry's blocks as
 // the library builds them (config.Zone.Contributions: public cache, SSL
 // mode, rate limits, trusted clients, managed WAF), with their refs. A
 // ruleset an estate registered in another form takes one in-place update
@@ -220,6 +221,7 @@ func ZoneArgs(name string, z config.Zone) (zone.Args, error) {
 		HSTS:           z.HSTS.Library(),
 		BotManagement:  z.BotManagement.Library(),
 		Records:        z.RecordsLibrary(name),
+		Redirects:      z.RedirectsLibrary(name),
 	}
 
 	if z.TotalTLS != nil {
@@ -240,8 +242,16 @@ func ZoneArgs(name string, z config.Zone) (zone.Args, error) {
 		out.AuthenticatedOriginPulls = &on
 	}
 
-	if z.ConfigRulesImportID != "" {
-		out.ImportRulesets = map[rules.Phase]string{rules.PhaseConfigSettings: z.ConfigRulesImportID}
+	if z.ConfigRulesImportID != "" || z.RedirectRulesImportID != "" {
+		out.ImportRulesets = map[rules.Phase]string{}
+
+		if z.ConfigRulesImportID != "" {
+			out.ImportRulesets[rules.PhaseConfigSettings] = z.ConfigRulesImportID
+		}
+
+		if z.RedirectRulesImportID != "" {
+			out.ImportRulesets[rules.PhaseDynamicRedirect] = z.RedirectRulesImportID
+		}
 	}
 
 	contributions, err := z.Contributions()

@@ -93,7 +93,10 @@ func main() {
 
 		cfgs := map[string]account.ChildTokenConfig{
 			"edge": {
-				Name:     "cloudflare-edge",
+				Name: "cloudflare-edge",
+				// Add EdgePoliciesWithRedirects(redirectZoneIDs, zoneIDs...)
+				// when a zone manages Single Redirects; the baseline never
+				// grants that permission.
 				Policies: account.EdgePolicies(zoneIDs...),
 			},
 			"r2-admin": {

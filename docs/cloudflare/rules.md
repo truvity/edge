@@ -17,6 +17,7 @@ rule (`Params`, `RateLimit` and `Logging` carry the action parameters).
 |---|---|
 | `PhaseCacheSettings` | `http_request_cache_settings` |
 | `PhaseConfigSettings` | `http_config_settings` |
+| `PhaseDynamicRedirect` | `http_request_dynamic_redirect` |
 | `PhaseFirewallCustom` | `http_request_firewall_custom` |
 | `PhaseFirewallManaged` | `http_request_firewall_managed` |
 | `PhaseRateLimit` | `http_ratelimit` |
@@ -47,7 +48,9 @@ rules that cache part of a host the hosts rule does not).
 `Assemble` refuses a conflicting writer: a `Ref` used twice within a phase
 (`cache-bypass` is reserved), a `Claim` outside the cache phase, a claim that
 is not parenthesised, an unknown phase, a rule without ref, action or
-expression.
+expression. The dynamic redirect phase assembles like any other: every
+declared redirect is one rule with its stable ref, and a phase with no
+contribution stays unmanaged.
 
 ## The bypass fold
 
@@ -83,6 +86,7 @@ public-paths-access.example.com]` and the bypass is
 | `TrustedClients(t)` | firewall custom | one `skip` rule; unmanaged block: no rules |
 | `ManagedWAF(m)` | firewall managed | one `execute` rule on `http.host in {...}`; `Hosts` may hold wildcards (suffix tests) in the library, but `cloudflare/config` feeds it only exact, derived hosts (`managed_waf: {enabled: true}`, see [config.md](config.md)); an expression over 4096 characters is refused |
 | `SSLMode(host, mode, ref)` | config settings | one `set_config` rule |
+| `Redirects(r)` | dynamic redirect | one `redirect` rule per exact source host, sorted by source then ref; target `concat("<https origin>", http.request.uri.path)`, default status 301 and query preservation on |
 
 `PublicPathsCache` caches a key set (a JWKS or similar public document) at the edge for the TTL it is given. When a signing key is removed after a compromise, purge those paths at Cloudflare as part of the removal: a removed key is otherwise still served from the edge cache until the edge TTL expires, and a verifier that fetches the set keeps trusting it for that long.
 
@@ -108,11 +112,19 @@ move).
 
 Child names per phase: cache `cache-rules-<name>`, firewall custom
 `firewall-custom-<name>`, firewall managed `firewall-managed-<name>`, rate
-limit `ratelimit-<name>`, config settings `ssl-mode-<name>`. Rules a
-contribution adds are registered with their `Ref` as the rule's `ref` and
-enabled; the blocks' own rules keep the inputs they always had (no `ref`).
-A zone that declares an SSL-mode contribution owns the whole
-`http_config_settings` phase, like the others.
+limit `ratelimit-<name>`, config settings `ssl-mode-<name>`, dynamic redirect
+`redirect-rules-<name>`. Rules a contribution adds are registered with their
+`Ref` as the rule's `ref` and enabled; the blocks' own rules keep the inputs
+they always had (no `ref`). The redirect block is a contribution built by the
+zone component (`zonespec.Args.Redirects`), so its rules keep their refs and
+an adopted ruleset preserves them. A zone that declares an SSL-mode
+contribution or a redirect owns the whole phase, like the others.
+
+The redirect action parameters (`rules.RedirectParams`) map to the provider's
+`fromValue`: `targetUrl.expression`, `statusCode` and
+`preserveQueryString`. The zone component adds one explicit dependency: a
+proxied DNS record whose name is a redirect source waits for the redirect
+ruleset (`pulumi.DependsOn`), which no declaration order can replace.
 
 `Contribution`, `Rule` and their parts are defined in `cloudflare/rulespec`
 (standard library only) so that `zonespec.Args` can carry them; `rules`

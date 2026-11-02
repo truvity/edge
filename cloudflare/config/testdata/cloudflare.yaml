@@ -47,6 +47,13 @@ zones:
     origin_cnames:
       access.example.com: "d-abcdef1234.execute-api.eu-central-1.amazonaws.com"
 
+    redirects:
+      - ref: www_to_apex
+        from: www.example.com
+        to: https://example.com
+        status: 301
+        preserve_query_string: true
+
     ssl_mode_rules:
       access.example.com: strict
     ssl_mode_rule_refs:
@@ -94,6 +101,10 @@ zones:
     records:
       - {name: docs.example.org, type: CNAME, content: docs-origin.cdn.example.net, ttl: 300, comment: CDN}
       - {name: openapi.example.org, type: CNAME, content: openapi-origin.cdn.example.net, ttl: 300, comment: CDN}
+      - {name: team.example.org, type: NS, content: ns1.nameservers.example, ttl: 300}
+      - {name: team.example.org, type: NS, content: ns2.nameservers.example, ttl: 300}
+      - {name: team.example.org, type: NS, content: ns3.nameservers.example, ttl: 300}
+      - {name: team.example.org, type: NS, content: ns4.nameservers.example, ttl: 300}
 
   example.net:
     account: partner

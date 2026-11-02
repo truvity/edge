@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/truvity/edge/v4/cloudflare/account"
 	"github.com/truvity/edge/v4/cloudflare/presets"
 	"github.com/truvity/edge/v4/cloudflare/presettoken"
 )
@@ -26,11 +27,12 @@ func testdataTable(t *testing.T) []presets.Preset {
 			Zones    []presets.Zone    `json:"zones"`
 		}
 		rows []struct {
-			Name     string   `json:"name"`
-			Kind     string   `json:"kind"`
-			Account  string   `json:"account"`
-			WAFZones []string `json:"waf_zones"`
-			Grants   []string `json:"grants"`
+			Name          string   `json:"name"`
+			Kind          string   `json:"kind"`
+			Account       string   `json:"account"`
+			WAFZones      []string `json:"waf_zones"`
+			RedirectZones []string `json:"redirect_zones"`
+			Grants        []string `json:"grants"`
 		}
 	)
 
@@ -42,7 +44,7 @@ func testdataTable(t *testing.T) []presets.Preset {
 
 	var rs []presets.Row
 	for _, r := range rows {
-		rs = append(rs, presets.Row{Name: r.Name, Kind: r.Kind, Account: r.Account, WAFZones: r.WAFZones, Grants: r.Grants})
+		rs = append(rs, presets.Row{Name: r.Name, Kind: r.Kind, Account: r.Account, WAFZones: r.WAFZones, RedirectZones: r.RedirectZones, Grants: r.Grants})
 	}
 
 	table, err := presets.Build(presets.Registry{Accounts: reg.Accounts, Zones: reg.Zones}, rs)
@@ -193,4 +195,43 @@ func TestOptionsHook(t *testing.T) {
 	}, pulumi.WithMocks("proj", "stack", newMocks()))
 	require.NoError(t, err)
 	assert.Len(t, called, 4)
+}
+
+// TestRedirectPresetPoliciesReachPrototypesAndBreakGlass pins the one policy
+// list: a zone preset's opt-in redirect grant is what the disabled prototype
+// and the break-glass mint both carry, on the same zone only.
+func TestRedirectPresetPoliciesReachPrototypesAndBreakGlass(t *testing.T) {
+	reg := presets.Registry{
+		Accounts: []presets.Account{{Name: "acme", ID: "0123456789abcdef0123456789abcdef"}},
+		Zones: []presets.Zone{
+			{Name: "a.example", ID: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Account: "acme"},
+			{Name: "b.example", ID: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", Account: "acme"},
+		},
+	}
+
+	table, err := presets.Build(reg, []presets.Row{{
+		Name: "acme-zone", Kind: presets.KindZone, Account: "acme",
+		Zones: []string{"a.example", "b.example"}, RedirectZones: []string{"a.example"},
+	}})
+	require.NoError(t, err)
+	require.Len(t, table, 1)
+
+	_, out, err := FromPresets(table, "acme")
+	require.NoError(t, err)
+	require.Len(t, out, 1)
+
+	assert.Equal(t, table[0].Policies, out[0].Policies, "the prototype carries the preset's policy list")
+	assert.Equal(t, table[0].Policies, table[0].Request().Policies, "break-glass mints the same list")
+
+	var redirect int
+	for _, p := range out[0].Policies {
+		if len(p.PermissionGroups) == 1 && p.PermissionGroups[0] == "Dynamic URL Redirects Write" {
+			redirect++
+			scope, ok := p.Scope.(account.ZoneScope)
+			require.True(t, ok)
+			assert.Equal(t, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", scope.ZoneID)
+		}
+	}
+
+	assert.Equal(t, 1, redirect, "one redirect grant, on the opted-in zone")
 }

@@ -14,7 +14,8 @@
 //	zone      the per-company zone stack: DNS, SSL, zone settings, cache
 //	          settings and config settings write on each zone; then Zone WAF
 //	          Write on Row.WAFZones, Bot Management Write on
-//	          Row.BotManagementZones, Cloud Connector Write on
+//	          Row.BotManagementZones, Dynamic URL Redirects Write on
+//	          Row.RedirectZones, Cloud Connector Write on
 //	          Row.CloudConnectorZones, DNS Write on Row.DNSOnlyZones and the
 //	          security.txt-only zones' Zone Settings Write. No account-wide
 //	          grant at all, no R2. (The `edge` kind, this plus the account's
@@ -173,6 +174,13 @@ type (
 		// a zone that sets bot_management needs; each must be among the
 		// zones of the row. StandardRows leaves it empty: set it on the row.
 		BotManagementZones []string
+		// RedirectZones (edge only) get Dynamic URL Redirects Write, the
+		// grant a zone that declares redirects needs; each must be among
+		// the zones of the row and be a managed zone of the account.
+		// StandardRows leaves it empty: set it on the row. Keep a zone here
+		// until its last redirect ruleset has been deleted: the same grant
+		// authorizes the delete.
+		RedirectZones []string
 		// CloudConnectorZones (edge only) get Cloud Connector Write; each must
 		// be a zone of Account. They need not be among the row's zones.
 		CloudConnectorZones []string
@@ -249,8 +257,9 @@ func Description(accountName, kind string) string {
 
 // StandardRows are the four rows an account has, in this order and named
 // <account>-<kind>: status, r2-admin, zone (Zone WAF Write on wafZones, Bot
-// Management Write on botZones) and services. grants and the other fields of
-// a row are the estate's: set them on the returned rows.
+// Management Write on botZones, and no redirect grant) and services. grants
+// and the other fields of a row are the estate's: set them on the returned
+// rows, including Row.RedirectZones for a zone that manages redirects.
 func StandardRows(accountName string, grants, wafZones, botZones []string) []Row {
 	return []Row{
 		{Name: PresetName(accountName, KindStatus), Kind: KindStatus, Account: accountName, Grants: slices.Clone(grants)},
@@ -437,8 +446,9 @@ func validateRow(reg Registry, row *Row) []error {
 
 	zoneKind := row.Kind == KindZone
 
-	if !zoneKind && (len(row.WAFZones) > 0 || len(row.BotManagementZones) > 0 || len(row.CloudConnectorZones) > 0 || len(row.DNSOnlyZones) > 0) {
-		bad("WAFZones, BotManagementZones, CloudConnectorZones and DNSOnlyZones are for the zone kind, not %s", row.Kind)
+	if !zoneKind && (len(row.WAFZones) > 0 || len(row.BotManagementZones) > 0 || len(row.RedirectZones) > 0 ||
+		len(row.CloudConnectorZones) > 0 || len(row.DNSOnlyZones) > 0) {
+		bad("WAFZones, BotManagementZones, RedirectZones, CloudConnectorZones and DNSOnlyZones are for the zone kind, not %s", row.Kind)
 	}
 
 	if zoneKind {
@@ -447,6 +457,7 @@ func validateRow(reg Registry, row *Row) []error {
 
 		checkList("WAFZones", row.WAFZones, covered, "is not among the zones of the row")
 		checkList("BotManagementZones", row.BotManagementZones, covered, "is not among the zones of the row")
+		checkList("RedirectZones", row.RedirectZones, covered, "is not among the zones of the row")
 		checkList("CloudConnectorZones", row.CloudConnectorZones, all, "")
 		checkList("DNSOnlyZones", row.DNSOnlyZones, notCovered, "is already among the zones of the row")
 
@@ -460,6 +471,7 @@ func validateRow(reg Registry, row *Row) []error {
 
 		managedOnly("WAFZones", row.WAFZones)
 		managedOnly("BotManagementZones", row.BotManagementZones)
+		managedOnly("RedirectZones", row.RedirectZones)
 		managedOnly("CloudConnectorZones", row.CloudConnectorZones)
 		managedOnly("DNSOnlyZones", row.DNSOnlyZones)
 	}
@@ -664,6 +676,13 @@ func build(reg Registry, row *Row) (Preset, error) {
 		}
 
 		p.Policies = append(p.Policies, account.BotManagementPolicies(bots...)...)
+
+		var redirects []string
+		for _, n := range row.RedirectZones {
+			redirects = append(redirects, zoneNamed(reg, n).ID)
+		}
+
+		p.Policies = append(p.Policies, account.RedirectPolicies(redirects...)...)
 
 		for _, n := range row.CloudConnectorZones {
 			p.Policies = append(p.Policies, account.ChildTokenPolicy{

@@ -212,3 +212,17 @@ func wafExpression(t *testing.T, contribs []rules.Contribution) string {
 
 	return ""
 }
+
+// TestNSDelegationIsNotAWAFHost keeps a DNS-only child-zone delegation out
+// of a managed WAF's derived host list.
+func TestNSDelegationIsNotAWAFHost(t *testing.T) {
+	cf := replaceOnce(t, string(readFixture(t, config.FileName)),
+		"  example.org:\n", "  example.org:\n    managed_waf: {enabled: true}\n")
+
+	c, err := load(t, cf, string(readFixture(t, catalog.FileName)))
+	require.NoError(t, err)
+
+	hosts := c.Zones["example.org"].WAFHosts
+	assert.NotContains(t, hosts, "team.example.org", "a delegation is never a WAF host")
+	assert.Contains(t, hosts, "ssi.example.org", "a proxied tunnel name is")
+}

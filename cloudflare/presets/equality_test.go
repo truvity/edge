@@ -33,11 +33,12 @@ type testRegistry struct {
 }
 
 type testRow struct {
-	Name     string   `json:"name"`
-	Kind     string   `json:"kind"`
-	Account  string   `json:"account"`
-	WAFZones []string `json:"waf_zones"`
-	Grants   []string `json:"grants"`
+	Name          string   `json:"name"`
+	Kind          string   `json:"kind"`
+	Account       string   `json:"account"`
+	WAFZones      []string `json:"waf_zones"`
+	RedirectZones []string `json:"redirect_zones"`
+	Grants        []string `json:"grants"`
 }
 
 type goldenPreset struct {
@@ -83,7 +84,7 @@ func inputs(t *testing.T) (Registry, []Row) {
 
 	var rows []Row
 	for _, r := range trow {
-		rows = append(rows, Row{Name: r.Name, Kind: r.Kind, Account: r.Account, WAFZones: r.WAFZones, Grants: r.Grants})
+		rows = append(rows, Row{Name: r.Name, Kind: r.Kind, Account: r.Account, WAFZones: r.WAFZones, RedirectZones: r.RedirectZones, Grants: r.Grants})
 	}
 
 	return reg, rows

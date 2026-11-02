@@ -100,8 +100,9 @@ names:
   children `setting-<slug>-ssl`, `-min-tls-version`, `-browser-cache-ttl`,
   `-always-use-https`, `-security-header`; `total-tls-<slug>`;
   `cache-rules-<slug>`; `firewall-custom-<slug>`; `firewall-managed-<slug>`;
-  `ratelimit-<slug>`; `ssl-mode-<slug>`; `tls-client-auth-<slug>`; and records
-  `record-<slug>-<host slug>-cname` or `record-<slug>-<host slug>-<type>-<content slug>`.
+  `ratelimit-<slug>`; `redirect-rules-<slug>`; `ssl-mode-<slug>`;
+  `tls-client-auth-<slug>`; and records `record-<slug>-<host slug>-cname` or
+  `record-<slug>-<host slug>-<type>-<content slug>` (A, AAAA and NS).
 - Tunnel component `truvity:cloudflare:Tunnel`, named by the tunnel (`<cluster>`
   for the `legacy_names` account, `<cluster>-<account>` otherwise), with children
   `tunnel-<name>`, `ingress-<name>`, `cname-<name>-<host slug>` and

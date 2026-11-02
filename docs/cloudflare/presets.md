@@ -32,7 +32,7 @@ read one `presets.Preset`.
 
 | Kind | Rights, in this order |
 |---|---|
-| `zone` | the per-company zone stack (`cloudflare-<company>-zone`): no account-wide grant. DNS, SSL and certificates, zone settings, cache settings and config settings write on each zone (`account.ZonePolicies`); Zone WAF Write on `WAFZones`; Bot Management Write on `BotManagementZones`; Cloud Connector Write on `CloudConnectorZones`; DNS Write on `DNSOnlyZones`; Zone Settings Write alone on each `SecurityTxtOnly` zone (one extra policy per such zone, last: what writing its security.txt takes, `account.SecurityTxtPolicies`). DNS Write is the zone's own `records:`. No R2. The `edge` kind (this plus the account's tunnel write in one token) was removed in v4.0.0: use `zone` and `services` |
+| `zone` | the per-company zone stack (`cloudflare-<company>-zone`): no account-wide grant. DNS, SSL and certificates, zone settings, cache settings and config settings write on each zone (`account.ZonePolicies`; the dashboard's "Config Rules: Edit"); Dynamic URL Redirects Write only on `RedirectZones` (`account.RedirectPolicies`; the dashboard's "Single Redirect > Edit"); Zone WAF Write on `WAFZones`; Bot Management Write on `BotManagementZones`; Cloud Connector Write on `CloudConnectorZones`; DNS Write on `DNSOnlyZones`; Zone Settings Write alone on each `SecurityTxtOnly` zone (one extra policy per such zone, last: what writing its security.txt takes, `account.SecurityTxtPolicies`). DNS Write is the zone's own `records:`. No R2. The `edge` kind (this plus the account's tunnel write in one token) was removed in v4.0.0: use `zone` and `services` |
 | `services` | the per-company services stack (`cloudflare-<company>-services`): tunnel write on the account; DNS write on each managed zone. The same policies as `status` (`tokensplit.StatusPolicies`), differing in name and description only; a `SecurityTxtOnly` zone is refused as for `status` |
 | `status` | tunnel write on the account; DNS write on each zone |
 | `dns` | DNS write on each zone |
@@ -45,9 +45,11 @@ read one `presets.Preset`.
 ### Moving from `edge` to `zone` and `services`
 
 The split replaces one `edge` token per account with two: `zone` for the zone
-stack and `services` for the services stack. `TestZonePlusServicesCoverEdge`
-pins that together they hold exactly the `(permission group, resource)` pairs
-`edge` holds for the same row inputs: no group lost, none gained. Only two
+stack and `services` for the services stack. For rows that do not opt into
+`RedirectZones`, the two together hold exactly the `(permission group,
+resource)` pairs `edge` holds for the same row inputs: no group lost, none
+gained. A redirect opt-in is zone-only and has no `services` counterpart; an
+`edge`-shaped token gets it with `account.EdgePoliciesWithRedirects`. Only two
 things differ, and both are the point of the split: `zone` has no tunnel write
 and `services` has it, and `services` repeats DNS Write on each managed zone
 (already inside `edge`'s zone policy). A `services` row cannot list a
@@ -57,8 +59,30 @@ no `services` row and the tunnel write has no counterpart. `edge` and
 
 A zone-scoped kind with no `Zones` covers every zone of its account, by zone
 name, so a further zone picks the grant up with no row change. With `Zones`
-the order is yours. `WAFZones` and `BotManagementZones` must be among the zones of the row;
-`DNSOnlyZones` must not be (that would grant the same twice).
+the order is yours. `WAFZones`, `BotManagementZones` and `RedirectZones` must
+be among the zones of the row; `DNSOnlyZones` must not be (that would grant the
+same twice). `RedirectZones` is the explicit redirect capability: a zone not
+listed there keeps the narrower baseline, even when another zone of the same
+preset manages redirects.
+
+### Redirect permission lifecycle
+
+`RedirectZones` is a retained allowlist, not a value derived from the zone's
+`redirects` block, so the token keeps the permission through every stage of
+the rule's life:
+
+1. **Enable:** add the zone to `RedirectZones` (and make sure it is in
+   `Zones`) and apply the presets/prototypes. Apply the zone stack after the
+   token exists, so the first ruleset create is authorized.
+2. **Disable or delete:** keep the zone in `RedirectZones` through
+   `disabled: true` staging and through deleting the last redirect ruleset.
+   The same `Dynamic URL Redirects Write` grant authorizes the delete.
+3. **Revoke:** only after the deletion apply has completed, remove the zone
+   from `RedirectZones` and apply the presets again.
+
+The same list is on `tokensplit.Inputs.RedirectZones` for an estate that mints
+its own edge child. Removing the last rule and revoking the grant in one change
+can leave the deletion without its permission.
 
 No kind grants Account API Tokens, Billing, Account Settings, Memberships or
 Access identity providers. sluis refuses a prototype that holds one, and a row
@@ -71,7 +95,7 @@ has no way to ask.
 | `Name` | the sluis preset name; `<account>-<kind>` by convention (`PresetName`) |
 | `Kind`, `Account` | a kind above; a registry account |
 | `Description` | empty: the kind's generic sentence (`Description(account, kind)`). It is listed wherever sluis lists the preset; it is not part of the prototype token |
-| `Zones`, `WAFZones`, `BotManagementZones`, `CloudConnectorZones`, `DNSOnlyZones` | zone names of `Account` (a `SecurityTxtOnly` zone may be in `Zones` only; the `dns` and `status` kinds never cover one, the insights kinds cover it like any zone); all but `Zones` are `edge` only. `BotManagementZones` is for the zones that set `bot_management`; `StandardRows` leaves it empty, so set it on the returned row |
+| `Zones`, `WAFZones`, `BotManagementZones`, `RedirectZones`, `CloudConnectorZones`, `DNSOnlyZones` | zone names of `Account` (a `SecurityTxtOnly` zone may be in `Zones` only; the `dns` and `status` kinds never cover one, the insights kinds cover it like any zone); all but `Zones` are `edge` only. `BotManagementZones` is for the zones that set `bot_management`; `RedirectZones` is for the zones that manage redirects; `StandardRows` leaves both empty, so set them on the returned row |
 | `Bucket`, `Jurisdiction` | bucket kinds only |
 | `Grants` | the policy groups that may ask |
 | `Lifetime` | zero: one hour |
@@ -87,7 +111,7 @@ has no way to ask.
 | `BuildReady(reg, rows)` | the same, leaving out the rows of an account with a pending zone (`zone_id_pending`): its prototypes would be narrower than its children, and the other accounts are unaffected |
 | `ForAccount(reg, rows, account)` | one account's presets; fails only for that account's own problems and names the pending zone |
 | `Named(table, name)`, `AccountOf(reg, preset)` | lookups |
-| `StandardRows(account, grants, wafZones, botZones)` | the four rows `<account>-status`, `-r2-admin`, `-zone` (WAF on `wafZones`, Bot Management on `botZones`) and `-services`. Until v4.0.0 it returned edge, status and r2-admin, and `SplitRows` added zone and services |
+| `StandardRows(account, grants, wafZones, botZones)` | the four rows `<account>-status`, `-r2-admin`, `-zone` (WAF on `wafZones`, Bot Management on `botZones`, no redirect grant) and `-services`. Set `RedirectZones` on the returned zone row. Until v4.0.0 it returned edge, status and r2-admin, and `SplitRows` added zone and services |
 
 A `Preset` carries `Name`, `Kind`, `Account`, `AccountID`, `Description`,
 `Policies` (the `account.ChildTokenPolicy` list, in its fixed order), `R2`,
@@ -134,7 +158,9 @@ protection, account and policies.
 
 A consumer that moves its own rows here proves parity in its own repository:
 it asserts the table built from its rows equals the policy documents it
-produced before the move.
+produced before the move. The opt-in redirect documents are pinned separately
+by `TestRedirectPresetGolden`, so the default golden stays the pre-redirect
+baseline.
 
 ## What stays with the estate
 

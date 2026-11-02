@@ -65,6 +65,54 @@ func TestDeployEdgeAndStatusScopeToTheAccountsOwnZones(t *testing.T) {
 	assertPolicy(t, admin[0], []string{PermWorkersR2StorageWrite}, "com.cloudflare.api.account."+testAccountID)
 }
 
+func TestDeployRedirectZonesAreScoped(t *testing.T) {
+	in := inputs(&recordingWriter{})
+	in.WAFZone = ""
+	in.RedirectZones = []string{"example.test"}
+
+	m, _ := deploy(t, in)
+
+	edge := m.policies("edge")
+	require.Len(t, edge, 3, "tunnel, baseline zone grant, redirect grant")
+	assertPolicy(t, edge[2], []string{PermDynamicRedirectsWrite},
+		"com.cloudflare.api.account.zone."+testZoneID)
+
+	status := m.policies("status")
+	assert.Len(t, status, 2, "the status child never gets the redirect grant")
+}
+
+func TestRedirectZoneIDsRefusesBadNames(t *testing.T) {
+	txt := Zone{Name: "txt.test", ID: "cccccccccccccccccccccccccccccccc", AccountID: testAccountID, SecurityTxtOnly: true}
+
+	for name, tc := range map[string]struct {
+		zones []Zone
+		names []string
+		want  string
+	}{
+		"ok":                {zones(), []string{"example.test"}, ""},
+		"empty":             {zones(), nil, ""},
+		"unknown":           {zones(), []string{"missing.test"}, "in none of the declared zones"},
+		"other account":     {zones(), []string{"other.test"}, "not in the account"},
+		"security.txt only": {append(zones(), txt), []string{"txt.test"}, "security.txt only"},
+		"duplicate":         {zones(), []string{"example.test", "example.test"}, "listed twice"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			ids, err := RedirectZoneIDs(tc.zones, testAccountID, MatchingZoneIDs(tc.zones, testAccountID), tc.names)
+			if tc.want == "" {
+				require.NoError(t, err)
+				if len(tc.names) > 0 {
+					assert.Equal(t, []string{testZoneID}, ids)
+				}
+
+				return
+			}
+
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tc.want)
+		})
+	}
+}
+
 func TestDeployWithoutAWAFZoneAddsNoWAFGrant(t *testing.T) {
 	in := inputs(&recordingWriter{})
 	in.WAFZone = ""

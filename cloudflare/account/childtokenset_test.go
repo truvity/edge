@@ -185,6 +185,30 @@ func TestEdgePoliciesShape(t *testing.T) {
 	assert.Equal(t, ZoneScope{ZoneID: "fedcba9876543210fedcba9876543210"}, policies[2].Scope)
 }
 
+func TestRedirectPoliciesAreOptIn(t *testing.T) {
+	const zoneA, zoneB = "0123456789abcdef0123456789abcdef", "fedcba9876543210fedcba9876543210"
+
+	for _, p := range append(ZonePolicies(zoneA), EdgePolicies(zoneA)...) {
+		assert.NotContains(t, p.PermissionGroups, PermDynamicRedirectsWrite,
+			"the baseline never grants the redirect group")
+	}
+
+	assert.Nil(t, RedirectPolicies(), "no zones: nothing to append")
+
+	got := RedirectPolicies(zoneA, zoneB)
+	require.Len(t, got, 2)
+	assert.Equal(t, []string{PermDynamicRedirectsWrite}, got[0].PermissionGroups)
+	assert.Equal(t, ZoneScope{ZoneID: zoneA}, got[0].Scope)
+	assert.Equal(t, ZoneScope{ZoneID: zoneB}, got[1].Scope)
+
+	with := EdgePoliciesWithRedirects([]string{zoneA}, zoneA, zoneB)
+	base := EdgePolicies(zoneA, zoneB)
+	require.Len(t, with, len(base)+1)
+	assert.Equal(t, base, with[:len(base)])
+	assert.Equal(t, []string{PermDynamicRedirectsWrite}, with[len(base)].PermissionGroups)
+	assert.Equal(t, ZoneScope{ZoneID: zoneA}, with[len(base)].Scope)
+}
+
 func TestEdgePoliciesNoZones(t *testing.T) {
 	policies := EdgePolicies()
 	require.Len(t, policies, 1, "the account-wide tunnel policy is unconditional")

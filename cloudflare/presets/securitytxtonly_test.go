@@ -27,7 +27,8 @@ func TestSecurityTxtOnlyZoneGetsZoneSettingsWriteAndNothingElse(t *testing.T) {
 
 			got := flat(t, table[0])
 			assert.Contains(t, got, "Zone Settings Write@zone."+zoneB)
-			assert.Contains(t, got, "DNS Write,SSL and Certificates Write,Zone Settings Write,Cache Settings Write,Config Settings Write@zone."+zoneA)
+			assert.Contains(t, got, "DNS Write,SSL and Certificates Write,Zone Settings Write,"+
+				"Cache Settings Write,Config Settings Write@zone."+zoneA)
 
 			// One policy on the held zone, and it is the last.
 			var held int

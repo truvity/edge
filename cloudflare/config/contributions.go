@@ -25,11 +25,12 @@ func (z Zone) SSLModeRef(host string) string {
 // block the zone does not declare contributes nothing.
 //
 // Not included, because the zone component takes them as blocks of their
-// own: the cacheable hosts (`cache`, zonespec.Args.Cache with CacheHosts) and
+// own: the cacheable hosts (`cache`, zonespec.Args.Cache with CacheHosts),
+// the canonical-host redirects (`redirects`, zonespec.Args.Redirects) and
 // the settings that are not rules (always_use_https, hsts, total_tls,
 // min_tls_version, records). A caller that passes these contributions must
-// not also pass the same blocks as zonespec.Args.RateLimits, TrustedClients
-// or ManagedWAF, or the rules are written twice.
+// not also pass the same blocks as zonespec.Args.RateLimits, TrustedClients,
+// ManagedWAF or Redirects, or the rules are written twice.
 //
 // The zone's Name must be set (Parse and Validate do); an error is the
 // builders', unchanged, prefixed with the block.

@@ -279,6 +279,8 @@ above — nothing broader, nothing hidden:
 ```go
 func EdgePolicies(zoneIDs ...string) []ChildTokenPolicy
 func EdgePoliciesWithWAF(wafZoneIDs []string, zoneIDs ...string) []ChildTokenPolicy
+func EdgePoliciesWithRedirects(redirectZoneIDs []string, zoneIDs ...string) []ChildTokenPolicy
+func RedirectPolicies(zoneIDs ...string) []ChildTokenPolicy
 func BotManagementPolicies(zoneIDs ...string) []ChildTokenPolicy
 func R2AdminPolicies() []ChildTokenPolicy
 func R2BucketParentPolicies(jurisdiction, bucket string) []ChildTokenPolicy
@@ -286,8 +288,10 @@ func R2BucketParentPolicies(jurisdiction, bucket string) []ChildTokenPolicy
 
 | Preset | Grants |
 | --- | --- |
-| `EdgePolicies(zoneIDs...)` | `Cloudflare Tunnel Write` on the whole account, plus `DNS Write`, `SSL and Certificates Write`, `Zone Settings Write`, `Cache Settings Write` and `Config Settings Write` (the dashboard's "Config Rules: Edit") on each zone in `zoneIDs` — a stack that manages zones (`cloudflare/zone`) and runs a tunnel (`cloudflare/tunnel`) |
+| `EdgePolicies(zoneIDs...)` | `Cloudflare Tunnel Write` on the whole account, plus `DNS Write`, `SSL and Certificates Write`, `Zone Settings Write`, `Cache Settings Write` and `Config Settings Write` (the dashboard's "Config Rules: Edit") on each zone in `zoneIDs` — a stack that manages zones (`cloudflare/zone`) and runs a tunnel (`cloudflare/tunnel`). It never grants `Dynamic URL Redirects Write` |
 | `EdgePoliciesWithWAF(wafZoneIDs, zoneIDs...)` | Everything `EdgePolicies(zoneIDs...)` grants, plus one policy per zone in `wafZoneIDs` granting only `Zone WAF Write` there — what `cloudflare/zone`'s `Args.TrustedClients` needs. Opt-in: an empty `wafZoneIDs` returns `EdgePolicies` unchanged. `wafZoneIDs` is independent of `zoneIDs`; list a zone in both when the token also manages it |
+| `EdgePoliciesWithRedirects(redirectZoneIDs, zoneIDs...)` | Everything `EdgePolicies(zoneIDs...)` grants, plus one policy per zone in `redirectZoneIDs` granting only `Dynamic URL Redirects Write` there — what `cloudflare/zone`'s `Args.Redirects` needs. Opt-in: empty returns `EdgePolicies` unchanged. For WAF plus redirects, append `RedirectPolicies` to `EdgePoliciesWithWAF` or list both in the consumer's own policy list |
+| `RedirectPolicies(zoneIDs...)` | one policy per zone granting only `Dynamic URL Redirects Write` (`PermDynamicRedirectsWrite`; the dashboard's "Single Redirect > Edit"). Append it to `ZonePolicies` or `EdgePolicies` for the zones that manage redirects. Keep a zone in the list until its last redirect ruleset is deleted: the same grant authorizes the delete |
 | `BotManagementPolicies(zoneIDs...)` | one policy per zone granting only `Bot Management Write` (`PermBotManagementWrite`) there — what `cloudflare/zone`'s `Args.BotManagement` needs. Append it to `EdgePolicies` or `EdgePoliciesWithWAF`; the preset does so for `Row.BotManagementZones`. No zones returns nil |
 | `R2AdminPolicies()` | `Workers R2 Storage Write` on the whole account — a stack that creates and administers R2 buckets (`cloudflare/r2`) |
 | `R2BucketParentPolicies(jurisdiction, bucket)` | `Workers R2 Storage Bucket Item Write` on exactly one bucket (`R2BucketScope{Jurisdiction: jurisdiction, Bucket: bucket}`) — a bucket consumer's own object-level credential (`cloudflare/r2` mints none; see [cloudflare/r2](#cloudflarer2)) |
@@ -406,7 +410,8 @@ z, err := zone.New(ctx, "example-com", zone.Args{
 | `Cache` | `cache` | see below | the zone's cache rules: which hostnames may be cached at all |
 | `TrustedClients` | `trustedClients` | see below | one rule that skips the security features for known client ranges on named hosts |
 | `RateLimits` | `rateLimits` | see below | the zone's whole `http_ratelimit` ruleset: rate limiting rules, validated against the zone plan's limits |
-| `Records` | `records` | see below | the listed DNS records, and only those: records made by hand, by an import or by a tunnel are never touched |
+| `Records` | `records` | see below | the listed DNS records, and only those: records made by hand, by an import or by a tunnel are never touched. Includes child-zone NS delegations |
+| `Redirects` | `redirects` | see below | the zone's whole `http_request_dynamic_redirect` phase: exact-host Single Redirects with a stable ref and a ruleset the DNS source can depend on |
 | `AlwaysUseHTTPS` | `alwaysUseHttps` | `true`, `false` (a `*bool`; nil leaves it alone) | the zone setting `always_use_https`: `on` redirects every plain-HTTP request to HTTPS |
 | `HSTS` | `hsts` | see below | the zone setting `security_header`: the `Strict-Transport-Security` header |
 | `BotManagement` | `botManagement` | see below | the zone's AI bots rule and managed `robots.txt` (`bot_management`), nothing else of it |
@@ -460,20 +465,84 @@ otherwise refuse a second entry point ruleset for the phase.
 | --- | --- | --- |
 | `Zone` | `zone` | the zone's lower-case domain (`example.com`); required when entries are set |
 | `Entries` | `entries` | the records, any order |
-| `Entries[].Name` | `name` | lower-case hostname, the zone itself or a name inside it; a leading `*.` makes a wildcard at any depth (`*.api.example.com`) |
-| `Entries[].Type` | `type` | `A`, `AAAA` or `CNAME`: the types Cloudflare can proxy |
-| `Entries[].Content` | `content` | IPv4 (`A`), IPv6 (`AAAA`), or a lower-case target hostname without a trailing dot (`CNAME`) |
-| `Entries[].Proxied` | `proxied` | serve the name through Cloudflare's edge (orange cloud); false answers DNS only |
-| `Entries[].TTL` | `ttl` | DNS-only TTL, 60 to 86400 seconds; 0 is automatic. A proxied record must leave it at 0 |
+| `Entries[].Name` | `name` | lower-case hostname, the zone itself or a name inside it; a leading `*.` makes it a wildcard at any depth (`*.api.example.com`). An NS owner is an exact name below the zone: no wildcard, no apex |
+| `Entries[].Type` | `type` | `A`, `AAAA`, `CNAME` or `NS`. NS delegates a child zone and is DNS only |
+| `Entries[].Content` | `content` | IPv4 (`A`), IPv6 (`AAAA`), or a lower-case target hostname without a trailing dot (`CNAME`, and one nameserver hostname per `NS`) |
+| `Entries[].Proxied` | `proxied` | serve the name through Cloudflare's edge (orange cloud); false answers DNS only. NS is always false |
+| `Entries[].TTL` | `ttl` | DNS-only TTL, 60 to 86400 seconds; 0 is automatic. A proxied record must leave it at 0. An NS record needs an explicit TTL, and one owner's targets share it |
 | `Entries[].Comment` | `comment` | shown beside the record in the dashboard |
 
 One `cloudflare.DnsRecord` per entry, named `record-<name>-<host-slug>-cname`
-for a CNAME and `record-<name>-<host-slug>-<type>-<content-slug>` for an A or
-AAAA (`zone.RecordName`). A record that already exists with the same name and
+for a CNAME and `record-<name>-<host-slug>-<type>-<content-slug>` for an A,
+AAAA or NS (`zone.RecordName`). A record that already exists with the same name and
 type (an import, a hand edit) is not adopted: delete it, or import it onto
-that name, before the first apply. A proxied name more than one label below
-the zone needs `totalTls` (or an advanced certificate) for the edge to serve
-it.
+that name, before the first apply. The provider import id is
+`<zone_id>/<dns_record_id>` (`pulumi import
+cloudflare:index/dnsRecord:DnsRecord <child> '<zone_id>/<dns_record_id>'`,
+with the zone component as the parent). Declaring a row is not automatic
+import. A proxied name more than one label below the zone needs `totalTls`
+(or an advanced certificate) for the edge to serve it.
+
+An NS delegation never joins the managed WAF and needs no certificate. A
+tunnel host exactly at or anywhere below an NS owner is refused: the child
+zone cut would hide the parent tunnel record. Child-zone contents are not
+created or managed here.
+
+`Redirects`:
+
+| Field | YAML key | Meaning |
+| --- | --- | --- |
+| `Zone` | `zone` | the zone's lower-case domain (`example.com`); required when entries are set |
+| `Entries` | `entries` | the redirects, any order; rendered sorted by `From`, then `Ref` |
+| `Entries[].Ref` | `ref` | stable rule ref, lowercase, unique in the phase (`www_to_apex`) |
+| `Entries[].From` | `from` | exact lower-case source hostname inside the zone; no wildcard, scheme or path |
+| `Entries[].To` | `to` | HTTPS origin (`https://example.com`) with no path, port, query or fragment; the request path is appended |
+| `Entries[].Status` | `status` | 301 (default), 302, 307 or 308 |
+| `Entries[].PreserveQueryString` | `preserveQueryString` | keep the query string; nil means true |
+| `Entries[].Disabled` | `disabled` | keep the rule and its ref, inert: the second rollback stage |
+
+One `cloudflare.Ruleset` for the zone's `http_request_dynamic_redirect`
+phase, child `redirect-rules-<name>`, with one rule per entry:
+
+```
+http.host eq "www.example.com"
+```
+
+and the action parameters `fromValue{targetUrl.expression:
+concat("https://example.com", http.request.uri.path), statusCode: 301,
+preserveQueryString: true}`. It matches HTTP and HTTPS on every path and needs
+no regex or WAF feature. Validation refuses an unsupported source or
+destination, a repeated ref or source, an invalid status, and a loop visible
+between the declared redirects.
+
+**Adoption.** A zone has one entry point ruleset per phase. Set
+`ImportRulesets[PhaseDynamicRedirect]` (the config file's
+`redirect_rules_import_id`) to adopt an existing ruleset by id, preserving its
+rule refs; the provider import id is `zones/<zone_id>/<ruleset_id>`, and the
+declared list must be the complete intended rule list, not a competing second
+ruleset. Remove the import once that apply is done.
+
+**Token permission.** Writing the phase needs `Dynamic URL Redirects Write` on
+the zone. `EdgePolicies`, `ZonePolicies` and the default `zone` preset do not
+include it; use `account.EdgePoliciesWithRedirects` / `account.RedirectPolicies`
+for the zones that manage redirects, or set `presets.Row.RedirectZones` (and
+`tokensplit.Inputs.RedirectZones` for a directly minted edge child). Scope it
+to the zones with redirects: the `zone` preset with no `RedirectZones` keeps
+the pre-redirect baseline.
+
+**Permission lifecycle.** Keep the zone in `RedirectZones` /
+`RedirectPolicies` through the whole life of the rule: grant it before the
+first ruleset create, retain it while the rule is disabled or the last ruleset
+is deleted (the same grant authorizes the delete), and revoke it only in a
+later presets apply after the deletion has completed.
+
+**Rule before proxy and rollback.** A proxied `records` entry whose name is a
+redirect source gets an explicit Pulumi `DependsOn` on the redirect ruleset,
+so the proxy update waits for the ruleset's apply; declaration order is not a
+dependency. A DNS-only source is valid and stages the rule inert. For
+rollback, restore the source DNS to legacy/DNS-only while keeping the rule,
+then disable (or remove) the rule in a second apply; a disabled entry keeps
+its ref and resource identity.
 
 `TrustedClients`:
 

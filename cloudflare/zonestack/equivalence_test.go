@@ -280,6 +280,7 @@ func legacyZoneArgs(name string, z config.Zone) zone.Args {
 
 	out.RateLimits = z.RateLimits.Library()
 	out.Records = z.RecordsLibrary(name)
+	out.Redirects = z.RedirectsLibrary(name)
 	out.AlwaysUseHTTPS = z.AlwaysUseHTTPS
 	out.HSTS = z.HSTS.Library()
 	out.BotManagement = z.BotManagement.Library()

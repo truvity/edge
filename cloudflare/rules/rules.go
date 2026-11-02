@@ -25,6 +25,8 @@ type (
 	SkipParams = rulespec.SkipParams
 	// ExecuteParams is rulespec.ExecuteParams.
 	ExecuteParams = rulespec.ExecuteParams
+	// RedirectParams is rulespec.RedirectParams.
+	RedirectParams = rulespec.RedirectParams
 	// Params is rulespec.Params.
 	Params = rulespec.Params
 	// RateLimit is rulespec.RateLimit.
@@ -39,6 +41,7 @@ type (
 const (
 	PhaseCacheSettings   Phase = "http_request_cache_settings"
 	PhaseConfigSettings  Phase = "http_config_settings"
+	PhaseDynamicRedirect Phase = "http_request_dynamic_redirect"
 	PhaseFirewallCustom  Phase = "http_request_firewall_custom"
 	PhaseFirewallManaged Phase = "http_request_firewall_managed"
 	PhaseRateLimit       Phase = "http_ratelimit"
@@ -46,7 +49,10 @@ const (
 
 // Phases lists every phase, in a fixed order.
 func Phases() []Phase {
-	return []Phase{PhaseCacheSettings, PhaseConfigSettings, PhaseFirewallCustom, PhaseFirewallManaged, PhaseRateLimit}
+	return []Phase{
+		PhaseCacheSettings, PhaseConfigSettings, PhaseDynamicRedirect,
+		PhaseFirewallCustom, PhaseFirewallManaged, PhaseRateLimit,
+	}
 }
 
 // Conventional Orders in the cache phase.
@@ -74,6 +80,7 @@ const (
 	ActionSetConfig        = "set_config"
 	ActionSkip             = "skip"
 	ActionExecute          = "execute"
+	ActionRedirect         = "redirect"
 )
 
 // TTL modes of Cloudflare cache settings.
@@ -139,8 +146,9 @@ func Assemble(c []Contribution) (map[Phase][]Rule, error) {
 			refs[con.Phase] = map[string]string{}
 		}
 
-		for _, r := range con.Rules {
-			if err := checkRule(&r); err != nil {
+		for i := range con.Rules {
+			r := &con.Rules[i]
+			if err := checkRule(r); err != nil {
 				errs = append(errs, fmt.Errorf("%s: %w", at, err))
 
 				continue
