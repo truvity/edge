@@ -44,6 +44,7 @@ accounts:
 zones:
   <domain>:                  # lowercase, no wildcard
     account: <name>
+    owner: platform | <company>   # optional; who owns the zone (see below)
     zone_id: <id>            # or zone_id_pending: true, never both
     manage: full | security_txt   # default full; security_txt manages the zone's security.txt ONLY (see below)
     ssl_mode: full | strict  # the zone's default toward its origins
@@ -83,6 +84,33 @@ at apply). Trusted-client ranges must have no host bits and may not be the
 whole address space; HSTS is never preloaded and is refused until
 `always_use_https` is on.
 
+## Zone owner
+
+`owner` records who owns a zone: `platform`, or one company of the estate.
+It is optional, and an empty owner says nothing about ownership.
+
+```yaml
+accounts:
+  main: {account_id: <id>, legacy_names: true}
+  acme: {account_id: <id>}            # company acme (its name; or set company: acme)
+zones:
+  example.net: {account: main, owner: platform, zone_id: <id>, ssl_mode: full}
+  example.org: {account: acme, owner: acme, zone_id: <id>, ssl_mode: strict}
+```
+
+The library knows no company. It checks two things. First, the owner is
+`platform` (`config.OwnerPlatform`, reserved) or a lowercase label of the
+same shape as an account's `company` (`config.CompanyPattern`). Second, a
+company's zone lives in an account of that company: `CompanyOf(account)`,
+which is the account's `company`, or else its name. A platform zone may live
+in any account. The estate checks that a company owner is one it
+registers.
+
+Nothing the library builds reads the owner. Tunnels, records, rulesets,
+presets and stack names are the same with or without it. `ZonesOwnedBy(owner)`
+lists an owner's zones, sorted. A zone with `manage: security_txt` may carry
+an owner.
+
 ## A zone managed for its security.txt only
 
 A hand-managed zone of an account can be brought into the registry so that
@@ -97,7 +125,8 @@ zones:
     security_txt: {contact: ["mailto:security@example.com"], expires: "2027-01-01T00:00:00Z"}
 ```
 
-The zone must carry `account`, `zone_id` and `security_txt`; every other zone
+The zone must carry `account`, `zone_id` and `security_txt`, and may carry
+`owner`; every other zone
 field (`ssl_mode`, `records`, `cache`, `hsts`, `bot_management`, `trusted_clients`,
 `zone_id_pending`, ...) is refused at load, and `manage` accepts only `full`
 (the default) and `security_txt`. `Zone.SecurityTxtOnly()` is the test.

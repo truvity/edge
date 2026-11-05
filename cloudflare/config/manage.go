@@ -26,7 +26,7 @@ func (z Zone) SecurityTxtOnly() bool { return z.Manage == ManageSecurityTxt }
 
 // securityTxtOnlyFields are the yaml keys a security_txt-only zone may set.
 var securityTxtOnlyFields = map[string]bool{
-	"account": true, "zone_id": true, "manage": true, "security_txt": true,
+	"account": true, "owner": true, "zone_id": true, "manage": true, "security_txt": true,
 }
 
 // validateManage checks Zone.Manage: a known value, and for security_txt the

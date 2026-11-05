@@ -129,12 +129,21 @@ type (
 		// Parse and Validate; not read from the file. Contributions needs it.
 		Name    string `yaml:"-"`
 		Account string `yaml:"account"`
-		ZoneID  string `yaml:"zone_id"`
+		// Owner is who owns the zone: OwnerPlatform, or a company of the
+		// estate (a lowercase label, CompanyPattern). Optional; empty says
+		// nothing about ownership. The library knows no company: it checks
+		// the shape, and that a company's zone lives in an account of that
+		// company (CompanyOf); the estate checks that the company is one it
+		// registers. A platform zone may live in any account. Nothing the
+		// library builds reads it: it is the estate's record of who may
+		// change the zone (ZonesOwnedBy).
+		Owner  string `yaml:"owner,omitempty"`
+		ZoneID string `yaml:"zone_id"`
 		// Manage says how much of the zone this registry manages: ManageFull
 		// (the default, empty) is everything the other fields declare;
 		// ManageSecurityTxt brings a hand-managed zone in for its
 		// security.txt ONLY. Such a zone must carry zone_id, account and
-		// security_txt and nothing else (validateSecurityTxtOnly); every
+		// security_txt, may carry owner, and nothing else (validateManage); every
 		// builder skips it, and the edge preset grants its token one group,
 		// Zone Settings Write.
 		Manage string `yaml:"manage,omitempty"`
@@ -611,8 +620,45 @@ func (t Tunnel) OwnsRecord(zone, host string) bool {
 	return t.CarriesIn(zone, host) && !slices.Contains(t.DNSElsewhere, host)
 }
 
-// CompanyPattern is the shape of Account.Company.
+// CompanyPattern is the shape of Account.Company, and of a company
+// Zone.Owner.
 var CompanyPattern = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
+
+// OwnerPlatform is the Zone.Owner of a zone the platform owns, as opposed to
+// one company. It is reserved: no company is called that.
+const OwnerPlatform = "platform"
+
+// ZonesOwnedBy is the zones whose owner is owner (OwnerPlatform or a
+// company), sorted. A zone that names no owner is nobody's here.
+func (c *Config) ZonesOwnedBy(owner string) []string {
+	var out []string
+
+	for _, name := range sortedKeys(c.Zones) {
+		if owner != "" && c.Zones[name].Owner == owner {
+			out = append(out, name)
+		}
+	}
+
+	return out
+}
+
+// validateOwner checks Zone.Owner: empty, OwnerPlatform, or a company label
+// whose zone lives in an account of that company.
+func (c *Config) validateOwner(where string, z Zone) error {
+	switch {
+	case z.Owner == "", z.Owner == OwnerPlatform:
+		return nil
+	case !CompanyPattern.MatchString(z.Owner):
+		return fmt.Errorf("%s.owner: %q is neither %q nor a company label matching %s", where, z.Owner, OwnerPlatform, CompanyPattern)
+	}
+
+	if co := c.CompanyOf(z.Account); co != z.Owner {
+		return fmt.Errorf("%s.owner: company %q owns the zone, but its account %q is company %q's (accounts.%s.company, else the account's name)",
+			where, z.Owner, z.Account, co, z.Account)
+	}
+
+	return nil
+}
 
 // Parse decodes cloudflare.yaml and validates the registry: everything
 // authored in the file, which needs no catalog. Decoding is strict, an unknown
@@ -992,6 +1038,10 @@ func (c *Config) validateRegistry() error {
 
 		if _, ok := c.Accounts[z.Account]; !ok {
 			return fmt.Errorf("%s.account: no account %q (known: %s)", where, z.Account, strings.Join(sortedKeys(c.Accounts), ", "))
+		}
+
+		if err := c.validateOwner(where, z); err != nil {
+			return err
 		}
 
 		if err := z.validateManage(where); err != nil {
