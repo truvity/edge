@@ -5,6 +5,12 @@ heading here is a patch cut automatically for dependency bumps alone; its
 GitHub Release lists them. The chart and the Go module are released
 together at every version.
 
+## Unreleased
+
+### Added
+
+- **`cloudflare/config`: an optional zone `owner`.** `zones.<zone>.owner` is `platform` (`config.OwnerPlatform`, reserved) or a company label of `config.CompanyPattern`'s shape. A company's zone must live in an account of that company (`CompanyOf`: the account's `company`, else its name); a platform zone may live in any account. The library knows no company: the caller checks that a company owner is one it registers. `Config.ZonesOwnedBy(owner)` lists an owner's zones, sorted. A `manage: security_txt` zone may carry it. Nothing the library builds reads the owner, so a file without it loads, derives and deploys exactly as before, and adding it changes no resource. See [docs/cloudflare/config.md](docs/cloudflare/config.md#zone-owner).
+
 ## v4.6.0
 
 ### Added
