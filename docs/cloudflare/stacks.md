@@ -44,6 +44,33 @@ tun, err := instancetunnel.Deploy(ctx, instancetunnel.Args{
 })
 ```
 
+### A zone stack of one owner
+
+`zonestack.Args.Owners` narrows a zone stack to the zones whose `owner`
+(`zones.<zone>.owner`) is listed: `config.OwnerPlatform`, a company label, or
+both. Left empty it deploys every zone of the company's accounts, as before.
+
+```go
+// only the zones the platform owns, though the company's account holds more
+err := zonestack.Deploy(ctx, zonestack.Args{
+    Config: cfg, Company: "example", Tokens: tokens,
+    Owners: []string{config.OwnerPlatform},
+})
+```
+
+When `Owners` is set, a zone of the company's accounts that names no owner is
+refused: the filter would otherwise guess which stack carries it. A zone with
+`manage: security_txt` registers nothing and is exempt. An entry that is neither
+`platform` nor a company label, or one listed twice, is refused.
+
+The filter changes which zones a stack holds and nothing about what it
+registers: a zone has the same resource names (the zone slug is the key) in a
+stack of its owner and in an unfiltered one. Handing a zone from one stack to
+another is therefore a state move (`pulumi state delete` in one stack,
+`pulumi import` in the other), not a replacement. `services` has no such filter:
+the tunnels and the CNAMEs of a company's zones stay in the company's services
+stack whoever owns the zone.
+
 The tunnels are `Config.Tunnels`, derived from the edge catalog by `config.Load`
 (one per cluster and account, hosts in ingress order), so `services` takes no
 catalog of its own: a second copy could only disagree. A name the catalog marks

@@ -163,3 +163,22 @@ func TestRefusals(t *testing.T) {
 		require.ErrorContains(t, err, tc.want, name)
 	}
 }
+
+// The services stack has no owner filter: the records of a company's zones
+// stay in its services stack whoever owns the zone.
+func TestZoneOwnersDoNotMoveTheCNAMEs(t *testing.T) {
+	before, err := run(t, args(t, "example", &sunk{}))
+	require.NoError(t, err)
+
+	a := args(t, "example", &sunk{})
+	for name, owner := range map[string]string{"example.com": config.OwnerPlatform, "example.org": "example"} {
+		z := a.Config.Zones[name]
+		z.Owner = owner
+		a.Config.Zones[name] = z
+	}
+
+	after, err := run(t, a)
+	require.NoError(t, err)
+
+	assert.Equal(t, before.ByKey(), after.ByKey())
+}

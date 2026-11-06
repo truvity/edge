@@ -5,6 +5,12 @@ heading here is a patch cut automatically for dependency bumps alone; its
 GitHub Release lists them. The chart and the Go module are released
 together at every version.
 
+## Unreleased
+
+### Added
+
+- **`cloudflare/zonestack`: `Args.Owners` deploys only the zones of the listed owners.** `Owners` lists `config.OwnerPlatform` and/or company labels; a zone whose `owner` is not listed registers nothing, and a zone of the company's accounts that names no owner is refused while `Owners` is set. Empty (the default) deploys every zone, exactly as before. Resource names do not depend on it, so a zone has the same URNs in a stack of its owner as in an unfiltered one. See [docs/cloudflare/stacks.md](docs/cloudflare/stacks.md#a-zone-stack-of-one-owner).
+
 ## v4.7.1
 
 - `github.com/klauspost/compress` v1.20.3, which fixes GO-2026-6865 (a panic decoding two-block frames).
