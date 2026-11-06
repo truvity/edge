@@ -24,6 +24,8 @@ documents. Read the half you adopt.
 - [cloudflare/config.md](cloudflare/config.md): `cloudflare/config`, the
   Cloudflare registry as a typed, Pulumi-free model (schema, derived tunnels,
   contributions, what stays with the estate)
+- [cloudflare/probe.md](cloudflare/probe.md): `cloudflare/probe`, a read-only
+  check of a zone's TLS floor and provider-owned names against its declaration
 - [cloudflare/stacks.md](cloudflare/stacks.md): `cloudflare/zonestack`,
   `cloudflare/services` and `cloudflare/instancetunnel`, the stack entry points,
   and the names they keep.
