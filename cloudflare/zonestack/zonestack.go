@@ -55,6 +55,10 @@ type Args struct {
 	AccountOptions func(account string) []pulumi.ResourceOption
 	ZoneOptions    func(zone string) []pulumi.ResourceOption
 
+	// Owners restricts the stack to the zones whose config.Zone.Owner is
+	// listed. Optional.
+	Owners []string
+
 	Logger *slog.Logger
 }
 
