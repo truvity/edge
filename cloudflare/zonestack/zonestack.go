@@ -18,6 +18,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"sort"
 
 	"github.com/pulumi/pulumi/sdk/v3/go/pulumi"
@@ -55,8 +56,15 @@ type Args struct {
 	AccountOptions func(account string) []pulumi.ResourceOption
 	ZoneOptions    func(zone string) []pulumi.ResourceOption
 
-	// Owners restricts the stack to the zones whose config.Zone.Owner is
-	// listed. Optional.
+	// Owners restricts the stack to the zones whose config.Zone.Owner is one
+	// of these: config.OwnerPlatform, or a company label
+	// (config.CompanyPattern). Empty deploys every zone of the company's
+	// accounts, as before. When set, a zone of those accounts that names no
+	// owner is refused rather than guessed at (a zone managed for its
+	// security.txt alone registers nothing and is exempt). Resource names do
+	// not depend on it: the same zone has the same URNs in a stack of its
+	// owner as in an unfiltered one, so a zone changes stacks by moving its
+	// state, not by replacing anything.
 	Owners []string
 
 	Logger *slog.Logger
@@ -76,6 +84,10 @@ func Deploy(ctx *pulumi.Context, args Args) error {
 	accounts := args.Config.AccountsOf(args.Company)
 	if len(accounts) == 0 {
 		return fmt.Errorf("zonestack: company %q has no account in the registry", args.Company)
+	}
+
+	if err := checkOwners(args.Owners); err != nil {
+		return err
 	}
 
 	logger := args.Logger
@@ -120,6 +132,16 @@ func Deploy(ctx *pulumi.Context, args Args) error {
 			continue
 		}
 
+		if len(args.Owners) > 0 {
+			if z.Owner == "" {
+				return fmt.Errorf("zone %s has no owner: Owners is set, so every zone of the company's accounts must name one (zones.%s.owner)", name, name)
+			}
+
+			if !slices.Contains(args.Owners, z.Owner) {
+				continue
+			}
+		}
+
 		if z.ZoneIDPending {
 			return fmt.Errorf("zone %s is zone_id_pending: the account %q's stacks need its zone id", name, z.Account)
 		}
@@ -136,6 +158,26 @@ func Deploy(ctx *pulumi.Context, args Args) error {
 		slog.Int("accounts", len(accounts)),
 		slog.Int("zones", zones),
 	)
+
+	return nil
+}
+
+// checkOwners refuses an Owners entry that is not config.OwnerPlatform or a
+// company label, and one named twice.
+func checkOwners(owners []string) error {
+	seen := map[string]bool{}
+
+	for _, o := range owners {
+		if o != config.OwnerPlatform && !config.CompanyPattern.MatchString(o) {
+			return fmt.Errorf("zonestack: Owners entry %q is neither %q nor a company label matching %s", o, config.OwnerPlatform, config.CompanyPattern)
+		}
+
+		if seen[o] {
+			return fmt.Errorf("zonestack: Owners lists %q more than once", o)
+		}
+
+		seen[o] = true
+	}
 
 	return nil
 }
