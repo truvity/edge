@@ -10,6 +10,7 @@ together at every version.
 ### Added
 
 - **`cloudflare/zonestack`: `Args.Owners` deploys only the zones of the listed owners.** `Owners` lists `config.OwnerPlatform` and/or company labels; a zone whose `owner` is not listed registers nothing, and a zone of the company's accounts that names no owner is refused while `Owners` is set. Empty (the default) deploys every zone, exactly as before. Resource names do not depend on it, so a zone has the same URNs in a stack of its owner as in an unfiltered one. See [docs/cloudflare/stacks.md](docs/cloudflare/stacks.md#a-zone-stack-of-one-owner).
+- **`cloudflare/config`: provider-owned names as a published input.** `config.ProviderNames` is versioned JSON (`ParseProviderNames`, `Marshal`): per zone, the exact names the platform writes (`hosts`, `status`, `tunnel`) under a `revision`. `Config.WithProviderNames` holds a company-owned zone to it: a `records` row, an `origin_cnames` key, or a redirect source or target on such a name is refused (`... is provider-owned (published input rev N); the platform writes it`). `Config.ProviderNamesFor(zone)` derives the tunnel part from the catalog, for the side that publishes. Nothing changes until `WithProviderNames` is called, and `Load` still needs a catalog. See [docs/cloudflare/config.md](docs/cloudflare/config.md#provider-owned-names).
 
 ## v4.7.1
 

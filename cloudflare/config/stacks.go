@@ -147,6 +147,8 @@ func (c *Config) ForAccount(account string) (*Config, error) {
 		Zones:    map[string]Zone{},
 		Fleets:   c.Fleets,
 		Root:     c.RootFor(account),
+
+		providerNames: c.providerNames,
 	}
 
 	for _, name := range sortedKeys(c.Zones) {
