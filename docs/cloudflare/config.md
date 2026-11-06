@@ -57,7 +57,7 @@ zones:
     public_cache: {host: <name>, ttl: 5m}                   # needs cache
     trusted_clients: {hosts: [...], ranges: [...], skip: [...]}   # skip default: bot and rate-limit checks only
     rate_limits: {plan: pro, rules: [{name, endpoints: [{host, path | path_prefix, methods}], characteristics, period, requests, mitigation_timeout, action}]}
-    managed_waf: {enabled: true}                            # hosts are derived, never written; or the older {hosts: [exact...]} | {whole_zone: true}
+    managed_waf: {enabled: true}                            # hosts are derived, never written; scope: zone covers the whole zone less opt-outs; or the older {hosts: [exact...]} | {whole_zone: true}
     ssl_mode_rules: {<host>: full | strict}
     ssl_mode_rule_refs: {<host>: <32 hex>}
     config_rules_import_id: <32 hex>
@@ -275,6 +275,38 @@ Exact lower-case names only, validated like the derived ones; a duplicate is
 absorbed. The rule is one expression, `http.host in {"a" "b" ...}`, sorted, and
 the build refuses one over Cloudflare's 4096-character limit
 (`zonespec.MaxRuleExpression`): opt names out with a reason, or split the zone.
+
+#### scope: zone, the whole zone with named exclusions
+
+`managed_waf: {enabled: true, scope: zone}` runs the ruleset on **the whole
+zone** and leaves out only the names that opted out, so a name declared
+tomorrow is covered with no edit and no list to forget. The default is
+`scope: hosts` (what `enabled: true` alone means, unchanged): choose `zone` per
+zone, because it changes that zone's live rule expression.
+
+```yaml
+zones:
+  example.com:
+    managed_waf: {enabled: true, scope: zone}
+```
+
+Opt-outs are written exactly as above, and still need a reason (`waf: off` with
+`waf_reason` on a catalog domain, `waf: false` with `waf_reason` on a proxied
+record). `Load` derives them into `Zone.WAFExclude`, and the rule's expression
+becomes:
+
+- `true`, when nothing opted out;
+- `not (http.host in {"a.example.com" "b.example.com"})` for exact names;
+- a wildcard opt-out (`*.preview.example.com`) is a suffix test,
+  `ends_with(http.host, ".preview.example.com")`, joined with `or` inside the
+  `not (...)`.
+
+In this form a proxied wildcard needs no opt-out: it is covered with the rest of
+the zone. `scope` needs `enabled`; it is refused beside `hosts`, `whole_zone`
+(`whole_zone: true` stays the older hand-written form), or on an unknown value.
+`AddWAFHosts` validates its names and then does nothing: the zone is already
+covered. The 4096-character limit applies to the exclusion list, and the build
+refuses an oversized one.
 
 **Order of applies**: apply the zone stack before the services stack. A WAF
 entry for a name that does not exist yet is harmless; the reverse (the name

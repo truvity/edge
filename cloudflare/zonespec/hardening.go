@@ -81,6 +81,12 @@ type (
 		// WholeZone runs the ruleset on every request to the zone.
 		// Exclusive with Hosts.
 		WholeZone bool `json:"wholeZone,omitempty" yaml:"wholeZone,omitempty"`
+		// ExcludeHosts are the names a whole-zone rule leaves out: an exact
+		// lower-case name or one leading wildcard label ("*.dev.example.com",
+		// every name below dev.example.com). Only with WholeZone, and then
+		// Zone is required: every name must be the zone or inside it. The
+		// expression is "not (<exclusions>)"; without any, "true".
+		ExcludeHosts []string `json:"excludeHosts,omitempty" yaml:"excludeHosts,omitempty"`
 		// Description of the rule. Empty uses "Cloudflare Managed
 		// Ruleset".
 		Description string `json:"description,omitempty" yaml:"description,omitempty"`
@@ -114,9 +120,12 @@ func (m *ManagedWAF) validate(zoneID string) error {
 	switch {
 	case m.WholeZone && len(m.Hosts) > 0:
 		return fmt.Errorf("zone %q: managedWaf: wholeZone and hosts are exclusive", zoneID)
-	case m.WholeZone:
+	case m.WholeZone && len(m.ExcludeHosts) == 0:
 		return nil
-	case len(m.Hosts) == 0:
+	case !m.WholeZone && len(m.ExcludeHosts) > 0:
+		return fmt.Errorf("zone %q: managedWaf: excludeHosts are the names a wholeZone rule leaves out; "+
+			"a host list already names what it covers", zoneID)
+	case len(m.Hosts) == 0 && !m.WholeZone:
 		return fmt.Errorf("zone %q: managedWaf: an empty host list would deploy a rule that matches nothing; "+
 			"list hosts, set wholeZone: true, or omit the block", zoneID)
 	}
@@ -125,22 +134,12 @@ func (m *ManagedWAF) validate(zoneID string) error {
 		return fmt.Errorf("zone %q: managedWaf.zone must be the zone's lower-case domain", zoneID)
 	}
 
-	seen := map[string]struct{}{}
+	if err := validateWAFNames(zoneID, "hosts", m.Zone, m.Hosts); err != nil {
+		return err
+	}
 
-	for i, host := range m.Hosts {
-		bare := strings.TrimPrefix(host, "*.")
-
-		if host != strings.ToLower(host) || bare == "" || strings.ContainsAny(bare, `*/:"\ `) || strings.HasSuffix(host, ".") ||
-			(bare != m.Zone && !strings.HasSuffix(bare, "."+m.Zone)) {
-			return fmt.Errorf("zone %q: managedWaf.hosts[%d] %q must be a lower-case hostname inside %s (a leading \"*.\" for a wildcard)",
-				zoneID, i, host, m.Zone)
-		}
-
-		if _, dup := seen[host]; dup {
-			return fmt.Errorf("zone %q: managedWaf.hosts[%d] %q is listed twice", zoneID, i, host)
-		}
-
-		seen[host] = struct{}{}
+	if err := validateWAFNames(zoneID, "excludeHosts", m.Zone, m.ExcludeHosts); err != nil {
+		return err
 	}
 
 	if n := len(ManagedWAFExpression(m)); n > MaxRuleExpression {
@@ -151,15 +150,48 @@ func (m *ManagedWAF) validate(zoneID string) error {
 	return nil
 }
 
+// validateWAFNames holds a list of names (field is its key in the block) to
+// the shape a managed WAF expression accepts: lower-case, inside zone, an
+// exact name or one leading wildcard label, listed once.
+func validateWAFNames(zoneID, field, zone string, names []string) error {
+	seen := map[string]struct{}{}
+
+	for i, host := range names {
+		bare := strings.TrimPrefix(host, "*.")
+
+		if host != strings.ToLower(host) || bare == "" || strings.ContainsAny(bare, `*/:"\ `) || strings.HasSuffix(host, ".") ||
+			(bare != zone && !strings.HasSuffix(bare, "."+zone)) {
+			return fmt.Errorf("zone %q: managedWaf.%s[%d] %q must be a lower-case hostname inside %s (a leading \"*.\" for a wildcard)",
+				zoneID, field, i, host, zone)
+		}
+
+		if _, dup := seen[host]; dup {
+			return fmt.Errorf("zone %q: managedWaf.%s[%d] %q is listed twice", zoneID, field, i, host)
+		}
+
+		seen[host] = struct{}{}
+	}
+
+	return nil
+}
+
 // MaxRuleExpression is Cloudflare's limit on a ruleset rule's expression.
 const MaxRuleExpression = 4096
 
 // ManagedWAFExpression is the filter the managed ruleset's execute rule
-// runs on: "true" for the whole zone, else the hosts, sorted so authoring
-// order never changes the plan.
+// runs on: "true" for the whole zone, "not (<exclusions>)" for the whole zone
+// less its excluded names, else the hosts, sorted so authoring order never
+// changes the plan.
 func ManagedWAFExpression(m *ManagedWAF) string {
 	if m.WholeZone {
-		return "true"
+		if len(m.ExcludeHosts) == 0 {
+			return "true"
+		}
+
+		excluded := append([]string(nil), m.ExcludeHosts...)
+		sort.Strings(excluded)
+
+		return "not (" + HostExpression(excluded) + ")"
 	}
 
 	hosts := append([]string(nil), m.Hosts...)

@@ -182,6 +182,11 @@ type (
 		// whatever the consumer adds with Config.AddWAFHosts. Sorted,
 		// de-duplicated, never a wildcard. Never authored.
 		WAFHosts []string `yaml:"-"`
+		// WAFExclude is the names a managed_waf with scope: zone leaves out:
+		// the catalog domains that opted out (waf: off) and the records that
+		// did (waf: false), exact or a leading wildcard. Derived by Load,
+		// sorted and de-duplicated, never authored; empty for scope hosts.
+		WAFExclude []string `yaml:"-"`
 		// TrustedClients exempts named client address ranges from the
 		// zone's Cloudflare security features on named hosts. Nil
 		// manages no firewall ruleset at all.
@@ -316,6 +321,12 @@ type (
 		Enabled   bool     `yaml:"enabled,omitempty"`
 		Hosts     []string `yaml:"hosts,omitempty"`
 		WholeZone bool     `yaml:"whole_zone,omitempty"`
+		// Scope is what an enabled block covers: WAFScopeHosts (the
+		// default, also written "hosts"): the derived exact host list; or
+		// WAFScopeZone: the whole zone, less the names that opted out
+		// (`waf: off` with a reason, `waf: false` with a reason on a record)
+		// as one `not (...)` expression. Needs enabled.
+		Scope string `yaml:"scope,omitempty"`
 	}
 
 	// SecurityTxtCfg is the zone's security.txt (RFC 9116), served by
@@ -628,6 +639,14 @@ func (t Tunnel) OwnsRecord(zone, host string) bool {
 // Zone.Owner.
 var CompanyPattern = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
 
+// The values of ManagedWAFCfg.Scope.
+const (
+	// WAFScopeHosts is the default: the rule lists the covered hosts.
+	WAFScopeHosts = "hosts"
+	// WAFScopeZone covers the whole zone less the opted-out names.
+	WAFScopeZone = "zone"
+)
+
 // OwnerPlatform is the Zone.Owner of a zone the platform owns, as opposed to
 // one company. It is reserved: no company is called that.
 const OwnerPlatform = "platform"
@@ -817,11 +836,16 @@ func (c *Config) derive(cat *catalog.Config, projects []catalog.Project) error {
 
 		if m := c.Zones[name].ManagedWAF; m != nil && m.Enabled {
 			in.WAFZones = append(in.WAFZones, name)
+
+			if m.Scope == WAFScopeZone {
+				in.WAFWholeZones = append(in.WAFWholeZones, name)
+			}
 		}
 	}
 
 	sort.Strings(in.CacheZones)
 	sort.Strings(in.WAFZones)
+	sort.Strings(in.WAFWholeZones)
 
 	for name, a := range c.Accounts {
 		in.LegacyNames[name] = a.LegacyNames
@@ -884,13 +908,13 @@ func (c *Config) derive(cat *catalog.Config, projects []catalog.Project) error {
 		c.Zones[name] = z
 	}
 
-	return c.deriveWAF(derived.WAFHosts)
+	return c.deriveWAF(derived.WAFHosts, derived.WAFExcluded)
 }
 
 // deriveWAF fills each enabled zone's WAFHosts: the hosts the catalog
 // derived plus the zone's proxied records that have not opted out. A proxied
 // wildcard record must opt out, for the reason a wildcard catalog host must.
-func (c *Config) deriveWAF(fromCatalog map[string][]string) error {
+func (c *Config) deriveWAF(fromCatalog, excludedFromCatalog map[string][]string) error {
 	for _, name := range sortedKeys(c.Zones) {
 		z := c.Zones[name]
 		if z.ManagedWAF == nil || !z.ManagedWAF.Enabled {
@@ -898,6 +922,8 @@ func (c *Config) deriveWAF(fromCatalog map[string][]string) error {
 		}
 
 		hosts := append([]string(nil), fromCatalog[name]...)
+		whole := z.ManagedWAF.Scope == WAFScopeZone
+		excluded := append([]string(nil), excludedFromCatalog[name]...)
 
 		for _, r := range z.Records {
 			if r.Proxied && r.WAF != nil && !*r.WAF && strings.TrimSpace(r.WAFReason) == "" {
@@ -919,6 +945,14 @@ func (c *Config) deriveWAF(fromCatalog map[string][]string) error {
 			}
 
 			if !(cfzone.Record{Proxied: r.Proxied, WAF: r.WAF}).WAFCovered() {
+				if whole && r.Proxied {
+					excluded = append(excluded, r.Name)
+				}
+
+				continue
+			}
+
+			if whole {
 				continue
 			}
 
@@ -930,7 +964,13 @@ func (c *Config) deriveWAF(fromCatalog map[string][]string) error {
 			hosts = append(hosts, r.Name)
 		}
 
-		z.WAFHosts = sortedUnique(hosts)
+		if whole {
+			z.WAFHosts = nil
+			z.WAFExclude = sortedUnique(excluded)
+		} else {
+			z.WAFHosts = sortedUnique(hosts)
+		}
+
 		c.Zones[name] = z
 	}
 
@@ -967,6 +1007,11 @@ func (c *Config) AddWAFHosts(zone string, hosts ...string) error {
 		if err := validateExactWAFHost(zone, h); err != nil {
 			return fmt.Errorf("%s: zones[%s]: AddWAFHosts: %w", FileName, zone, err)
 		}
+	}
+
+	// A whole-zone rule already covers the name; there is no list to add to.
+	if z.ManagedWAF.Scope == WAFScopeZone {
+		return nil
 	}
 
 	z.WAFHosts = sortedUnique(append(append([]string(nil), z.WAFHosts...), hosts...))
@@ -1711,6 +1756,10 @@ func (z Zone) ManagedWAFLibrary(zoneName string) *cfzone.ManagedWAF {
 		return z.ManagedWAF.Library(zoneName)
 	}
 
+	if z.ManagedWAF.Scope == WAFScopeZone {
+		return &cfzone.ManagedWAF{Zone: zoneName, WholeZone: true, ExcludeHosts: z.WAFExclude}
+	}
+
 	return &cfzone.ManagedWAF{Zone: zoneName, Hosts: z.WAFHosts}
 }
 
@@ -1725,6 +1774,16 @@ func (z Zone) validateManagedWAF(where string) error {
 
 	if m.Enabled && (len(m.Hosts) > 0 || m.WholeZone) {
 		return fmt.Errorf("%s.managed_waf: enabled derives the hosts from the edge catalog; it is exclusive with hosts and whole_zone (one source)", where)
+	}
+
+	switch m.Scope {
+	case "":
+	case WAFScopeHosts, WAFScopeZone:
+		if !m.Enabled {
+			return fmt.Errorf("%s.managed_waf.scope: %q needs enabled: true; hosts and whole_zone are the older forms and take no scope", where, m.Scope)
+		}
+	default:
+		return fmt.Errorf("%s.managed_waf.scope: %q is neither %q (the default) nor %q", where, m.Scope, WAFScopeHosts, WAFScopeZone)
 	}
 
 	for i, h := range m.Hosts {
