@@ -91,6 +91,10 @@ type (
 		// stack; everything above is the edge stack's, except R2 above, the
 		// R2 stack's own.
 		Root RootChildren `yaml:"root"`
+
+		// providerNames is the platform's published names
+		// (WithProviderNames); Validate holds a company's zones to it.
+		providerNames *ProviderNames
 	}
 
 	// Account is one Cloudflare account and the API token that manages it.
@@ -1230,6 +1234,10 @@ func (c *Config) Validate() error {
 	}
 
 	if err := c.validateRecordTunnels(); err != nil {
+		return err
+	}
+
+	if err := c.validateProviderNames(); err != nil {
 		return err
 	}
 

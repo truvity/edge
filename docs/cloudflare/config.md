@@ -111,6 +111,62 @@ presets and stack names are the same with or without it. `ZonesOwnedBy(owner)`
 lists an owner's zones, sorted. A zone with `manage: security_txt` may carry
 an owner.
 
+## Provider-owned names
+
+A company that owns a zone must not write a name the platform writes. The
+platform's tunnels write a CNAME for every catalog host, and its status pages
+write theirs; the company's program holds none of that catalog, so it is told
+the names instead. The platform publishes them as versioned JSON, and
+`WithProviderNames` holds the company's zones to them.
+
+```json
+{
+  "version": 1,
+  "revision": 7,
+  "zones": {
+    "example.org": {
+      "hosts": ["app.example.org"],
+      "status": ["status.example.org"],
+      "tunnel": ["console.example.org"]
+    }
+  }
+}
+```
+
+`version` is the schema (`config.ProviderNamesVersion`); `revision` counts the
+platform's publications, at least 1. In each zone the lists hold exact
+lower-case hostnames inside that zone: `tunnel` the CNAMEs the platform's tunnels
+write, `status` those of its status pages (no catalog holds them), `hosts` any
+other name it serves. A wildcard is not a name here. `ParseProviderNames` is
+strict: an unknown key, an unknown version, a missing revision or a name
+outside its zone fails.
+
+```go
+cfg, err := config.Parse(data) // a company has no platform catalog: Load is not for it
+pn, err := config.ParseProviderNames(published)
+err = cfg.WithProviderNames(pn)
+```
+
+In a zone whose `owner` is a company, a `records` row, an `origin_cnames` key,
+or a redirect `from` or `to` host that is a provider-owned name is refused:
+
+```text
+cloudflare.yaml: zones[example.org].records[status.example.org]: status.example.org is provider-owned (published input rev 7); the platform writes it
+```
+
+The platform's own zones and zones with no `owner` are not checked. Nothing
+changes without `WithProviderNames`; a config that carries names re-checks
+them on every `Validate`. A nil artifact is refused, so a missing input is
+never read as "nothing is provider-owned". `Load` still needs the catalog and
+fails without one.
+
+The platform produces its side with `Config.ProviderNamesFor(zone)`, which
+lists the exact names the registry's tunnels write the CNAME of (a wildcard
+host and a `dns_elsewhere` host are left out), and adds `Status` and `Hosts`
+itself. `ProviderNames.Marshal` writes sorted, de-duplicated lists, so the same
+facts are the same bytes. A committed copy is advisory: the published input is
+what a program reads.
+
 ## A zone managed for its security.txt only
 
 A hand-managed zone of an account can be brought into the registry so that
