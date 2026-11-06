@@ -138,6 +138,11 @@ type (
 		// WAFHosts, and only in them is a proxied wildcard host refused
 		// unless the catalog opted it out.
 		WAFZones []string
+		// WAFWholeZones are the WAFZones whose rule covers the whole zone
+		// (managed_waf scope: zone). In them the catalog's opted-out names
+		// are returned as WAFExcluded, and a proxied wildcard host needs no
+		// opt-out: the zone is covered, not listed.
+		WAFWholeZones []string
 	}
 
 	// Derived is what Derive returns.
@@ -151,6 +156,9 @@ type (
 		// hosts: every host an exposure serves in the zone, opted-out ones
 		// removed. Never a wildcard.
 		WAFHosts map[string][]string
+		// WAFExcluded maps each WAFWholeZones zone to its sorted,
+		// de-duplicated opted-out names, exact or a leading wildcard.
+		WAFExcluded map[string][]string
 	}
 )
 
@@ -214,12 +222,12 @@ func Derive(in DeriveInput) (Derived, error) {
 		}
 	}
 
-	wafHosts, err := deriveWAF(in, zones)
+	wafHosts, wafExcluded, err := deriveWAF(in, zones)
 	if err != nil {
 		return Derived{}, err
 	}
 
-	out := Derived{CacheHosts: deriveCache(in, zones), WAFHosts: wafHosts}
+	out := Derived{CacheHosts: deriveCache(in, zones), WAFHosts: wafHosts, WAFExcluded: wafExcluded}
 
 	for k, list := range hosts {
 		ordered := OrderHosts(list)
@@ -429,12 +437,17 @@ func sortedKeys[V any](m map[string]V) []string {
 // would be a suffix test that also covers names nobody declared. So a proxied
 // wildcard host in a WAF zone must be opted out with a reason, and is
 // refused here, naming the host, when it is not.
-func deriveWAF(in DeriveInput, zones []string) (map[string][]string, error) {
+//
+// A zone in WAFWholeZones is the other form: its rule covers the whole zone,
+// so nothing is listed (no host, and no wildcard to refuse) and the opted-out
+// names, wildcards included, are returned as excluded.
+func deriveWAF(in DeriveInput, zones []string) (hosts, excluded map[string][]string, err error) {
 	if len(in.WAFZones) == 0 {
-		return nil, nil
+		return nil, nil, nil
 	}
 
 	byZone := map[string][]string{}
+	offByZone := map[string][]string{}
 
 	for _, e := range in.Exposures {
 		for gi := range e.Groups {
@@ -446,12 +459,22 @@ func deriveWAF(in DeriveInput, zones []string) (map[string][]string, error) {
 					continue
 				}
 
+				whole := slices.Contains(in.WAFWholeZones, zone)
+
 				if slices.Contains(g.WAFOff, host) {
+					if whole {
+						offByZone[zone] = append(offByZone[zone], host)
+					}
+
+					continue
+				}
+
+				if whole {
 					continue
 				}
 
 				if strings.HasPrefix(host, "*.") {
-					return nil, fmt.Errorf(
+					return nil, nil, fmt.Errorf(
 						"exposures[%s].clusters[%s].groups[%s]: %q is a proxied wildcard in zone %s, whose managed_waf lists exact names only: "+
 							"give the domain waf: off and a waf_reason, and list the exact names it serves",
 						e.Name, g.Cluster, g.Name, host, zone)
@@ -462,14 +485,24 @@ func deriveWAF(in DeriveInput, zones []string) (map[string][]string, error) {
 		}
 	}
 
-	out := make(map[string][]string, len(in.WAFZones))
-
-	for _, zone := range in.WAFZones {
-		hosts := byZone[zone]
-		slices.Sort(hosts)
-
-		out[zone] = slices.Compact(hosts)
+	hosts = make(map[string][]string, len(in.WAFZones))
+	if len(in.WAFWholeZones) > 0 {
+		excluded = make(map[string][]string, len(in.WAFWholeZones))
 	}
 
-	return out, nil
+	for _, zone := range in.WAFZones {
+		list := byZone[zone]
+		slices.Sort(list)
+
+		hosts[zone] = slices.Compact(list)
+	}
+
+	for _, zone := range in.WAFWholeZones {
+		list := offByZone[zone]
+		slices.Sort(list)
+
+		excluded[zone] = slices.Compact(list)
+	}
+
+	return hosts, excluded, nil
 }
