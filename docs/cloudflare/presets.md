@@ -96,12 +96,41 @@ has no way to ask.
 | `Kind`, `Account` | a kind above; a registry account |
 | `Description` | empty: the kind's generic sentence (`Description(account, kind)`). It is listed wherever sluis lists the preset; it is not part of the prototype token |
 | `Zones`, `WAFZones`, `BotManagementZones`, `RedirectZones`, `CloudConnectorZones`, `DNSOnlyZones` | zone names of `Account` (a `SecurityTxtOnly` zone may be in `Zones` only; the `dns` and `status` kinds never cover one, the insights kinds cover it like any zone); all but `Zones` are `edge` only. `BotManagementZones` is for the zones that set `bot_management`; `RedirectZones` is for the zones that manage redirects; `StandardRows` leaves both empty, so set them on the returned row |
+| `Owner` | empty: a row of the account, as before. Otherwise `platform` or a company label: the row is scoped to that owner's zones (below) |
 | `Bucket`, `Jurisdiction` | bucket kinds only |
 | `Grants` | the policy groups that may ask |
 | `Lifetime` | zero: one hour |
 | `Store`, `Rotation` | `none` (default, no rotation) or `external` (rotation positive and under the lifetime) |
 
 `Validate(reg, rows)` reports every problem at once; `Build` calls it.
+
+### Owner rows
+
+A company that shares an account with the platform must not be handed a
+credential that reaches the platform's zones. Set `Zone.Owner` on the registry's
+zones (the zone `owner` of `cloudflare/config`) and `Row.Owner` on the company's
+zone row:
+
+```go
+reg.Zones = []presets.Zone{
+    {Name: "a.example", ID: idA, Account: "main", Owner: "acme"},
+    {Name: "b.example", ID: idB, Account: "main", Owner: "platform"},
+}
+rows := []presets.Row{{
+    Name: "main-acme-zone", Kind: presets.KindZone, Account: "main",
+    Owner: "acme", Zones: []string{"a.example"},
+}}
+```
+
+An owner row is refused unless it is the zone kind (`services`, `status`, `dns`,
+the insights kinds and the bucket kinds are not scoped to a list of zones), it
+lists `Zones` explicitly (empty would mean every zone of the account), every
+listed zone has that owner in the registry (an unowned zone and another owner's
+zone are both refused), and it sets neither `DNSOnlyZones` nor
+`CloudConnectorZones`, which name zones outside `Zones`. It grants exactly what
+the same row without an `Owner` grants, and `Preset.Owner` carries the owner so
+the guard that decides who may ask for the preset can read it. A row without an
+`Owner` is checked as before.
 
 ## Building
 

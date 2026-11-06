@@ -144,6 +144,11 @@ type (
 		// Settings Write and nothing else; the dns and status kinds never
 		// cover it; the insights kinds cover it as any zone.
 		SecurityTxtOnly bool
+		// Owner is who owns the zone: "platform", or a company label (a
+		// lowercase name). The registry's zone owner (cloudflare/config
+		// Zone.Owner); empty says nothing about ownership. Only a row with
+		// an Owner reads it.
+		Owner string
 	}
 
 	// Registry is the accounts and zones the rows refer to.
@@ -154,6 +159,16 @@ type (
 
 	// Row is one preset as an estate states it.
 	Row struct {
+		// Owner scopes the row to one owner's zones: "platform" or a company
+		// label. Empty (the default) is a row of the account, as before.
+		// An owner row is the zone kind only, lists Zones explicitly (never
+		// "every zone of the account"), every listed zone has this owner in
+		// the registry (an unowned zone is refused, so is another owner's),
+		// and it has no DNSOnlyZones or CloudConnectorZones, which name zones
+		// outside Zones. It grants exactly what the same row without an Owner
+		// grants; the owner is what the guard that decides who may ask for
+		// the preset reads (Preset.Owner).
+		Owner string
 		// Name is the sluis preset name: <account>-<kind> by convention
 		// ([PresetName]).
 		Name string
@@ -202,6 +217,9 @@ type (
 
 	// Preset is a row with its policies built.
 	Preset struct {
+		// Owner is the row's Owner: whose zones the preset is limited to,
+		// or empty for a preset of the account.
+		Owner      string
 		Name, Kind string
 		// Account is the account name, AccountID its id.
 		Account, AccountID string
@@ -476,6 +494,8 @@ func validateRow(reg Registry, row *Row) []error {
 		managedOnly("DNSOnlyZones", row.DNSOnlyZones)
 	}
 
+	errs = append(errs, validateOwner(reg, row, zoneKind)...)
+
 	switch {
 	case bucketed && !account.ValidR2BucketName(row.Bucket):
 		bad("Bucket %q is not an R2 bucket name", row.Bucket)
@@ -506,6 +526,54 @@ func validateRow(reg Registry, row *Row) []error {
 		}
 	default:
 		bad("store %q is not %q or %q", row.Store, StoreNone, StoreExternal)
+	}
+
+	return errs
+}
+
+// ownerPattern is the shape of a row's Owner and a zone's: "platform" or a
+// company label.
+var ownerPattern = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
+
+// validateOwner holds an owner row to what makes it the owner's: the zone
+// kind, explicit zones, every one of them the owner's, and no zone outside
+// that list.
+func validateOwner(reg Registry, row *Row, zoneKind bool) []error {
+	if row.Owner == "" {
+		return nil
+	}
+
+	var errs []error
+
+	bad := func(format string, args ...any) { errs = append(errs, fmt.Errorf(format, args...)) }
+
+	if !ownerPattern.MatchString(row.Owner) {
+		bad("Owner %q is not \"platform\" or a company label (lowercase letters, digits and hyphens, starting with a letter)", row.Owner)
+	}
+
+	if !zoneKind {
+		bad("Owner is for the zone kind, not %s: only the zone stack's rights are scoped to a list of zones", row.Kind)
+	}
+
+	if len(row.Zones) == 0 {
+		bad("Owner needs Zones: an owner row names its zones, it never means every zone of the account")
+	}
+
+	for _, n := range row.Zones {
+		z := zoneNamed(reg, n)
+
+		switch {
+		case z.Name == "":
+			// reported by the Zones check
+		case z.Owner == "":
+			bad("Zones: zone %q has no owner in the registry, so it cannot be in a row owned by %q", n, row.Owner)
+		case z.Owner != row.Owner:
+			bad("Zones: zone %q is owned by %q, not by %q", n, z.Owner, row.Owner)
+		}
+	}
+
+	if len(row.DNSOnlyZones) > 0 || len(row.CloudConnectorZones) > 0 {
+		bad("Owner rows take no DNSOnlyZones or CloudConnectorZones: they name zones outside Zones, and an owner row's rights stay inside its list")
 	}
 
 	return errs
@@ -647,7 +715,7 @@ func build(reg Registry, row *Row) (Preset, error) {
 	managedIDs := idsOf(managed)
 
 	p := Preset{
-		Name: row.Name, Kind: row.Kind, Account: row.Account, AccountID: acct.ID,
+		Name: row.Name, Kind: row.Kind, Account: row.Account, AccountID: acct.ID, Owner: row.Owner,
 		Description: row.Description, Lifetime: row.lifetime(), Rotation: row.Rotation, Store: row.Store,
 		Grants: slices.Clone(row.Grants),
 	}
