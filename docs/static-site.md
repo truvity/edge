@@ -305,7 +305,7 @@ these objects is confined on the `project` tag (`aws:ResourceTag/project`), so
 put `project: <name>` in `ack.tags`. A refused apply reads as an ACK condition
 on the object, not as a failed pod.
 
-**IRSA** (hive, any cluster without EKS Pod Identity) stays values only: create
+**IRSA** (any cluster without EKS Pod Identity) stays values only: create
 the role and its trust outside the chart and set
 `serviceAccount.annotations["eks.amazonaws.com/role-arn"]`. `registry.ack`
 stays off (and `static-site` creates its ServiceAccount, with no identity check).
