@@ -9,12 +9,12 @@ defaults:
       group: cert-manager.io
 
 groups:
-  url-shortener:
+  umbrella-corp:
     domains:
-      - url-shortener.example.com
+      - umbrella-corp.example.com
     allowedRoutes:
       namespaces:
         from: Selector
         selector:
           matchLabels:
-            gateway.example.com/route-grant-url-shortener: "true"
+            gateway.example.com/route-grant-umbrella-corp: "true"

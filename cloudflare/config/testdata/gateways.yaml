@@ -17,15 +17,15 @@ exposures:
           otlp: {domains: [otlp.example.com], route_namespaces: [monitoring]}
       devel:
         groups:
-          dms: {domains: [dms.devel.example.com], route_namespaces: [dms]}
-          eudi:
+          acme: {domains: [acme.devel.example.com], route_namespaces: [acme]}
+          globex:
             domains:
-              - eudi.devel.example.com
-              - {host: '*.eudi.devel.example.com', waf: off, waf_reason: per-install names; the exact ones are listed by their own domains}
-            route_namespaces: [eudi]
+              - globex.devel.example.com
+              - {host: '*.globex.devel.example.com', waf: off, waf_reason: per-install names; the exact ones are listed by their own domains}
+            route_namespaces: [globex]
           headlamp: {domains: [headlamp.devel.example.com], route_namespaces: [headlamp]}
           otlp: {domains: [otlp.devel.example.com], route_namespaces: [monitoring]}
-          shortener: {domains: [url-shortener.devel.example.com], route_namespaces: [url-shortener]}
+          umbrella: {domains: [umbrella-corp.devel.example.com], route_namespaces: [umbrella-corp]}
           gemaal: {domains: [gemaal.example.com], route_namespaces: [gemaal]}
           catch-all:
             domains:
@@ -38,17 +38,17 @@ exposures:
           landing: {domains: [landing.devel.example.net], route_namespaces: [landing]}
       stage:
         groups:
-          dms: {domains: [dms.stage.example.com, ssi.example.org], route_namespaces: [dms]}
-          eudi: {domains: [eudi.stage.example.com], route_namespaces: [eudi]}
+          acme: {domains: [acme.stage.example.com, ssi.example.org], route_namespaces: [acme]}
+          globex: {domains: [globex.stage.example.com], route_namespaces: [globex]}
           headlamp: {domains: [headlamp.stage.example.com], route_namespaces: [headlamp]}
-          shortener: {domains: [url-shortener.stage.example.com], route_namespaces: [url-shortener]}
+          umbrella: {domains: [umbrella-corp.stage.example.com], route_namespaces: [umbrella-corp]}
           landing: {domains: [landing.stage.example.net], route_namespaces: [landing]}
       prod:
         groups:
-          dms: {domains: [dms.prod.example.com], route_namespaces: [dms]}
-          eudi: {domains: [eudi.prod.example.com], route_namespaces: [eudi]}
+          acme: {domains: [acme.prod.example.com], route_namespaces: [acme]}
+          globex: {domains: [globex.prod.example.com], route_namespaces: [globex]}
           headlamp: {domains: [headlamp.prod.example.com], route_namespaces: [headlamp]}
-          shortener: {domains: [url-shortener.prod.example.com], route_namespaces: [url-shortener]}
+          umbrella: {domains: [umbrella-corp.prod.example.com], route_namespaces: [umbrella-corp]}
           landing: {domains: [landing.prod.example.net], route_namespaces: [landing]}
   private:
     class: internal

@@ -21,7 +21,7 @@ import (
 
 // The fixture is shaped like an estate's real cloudflare.yaml and edge
 // catalog, with placeholder accounts, zones and ids.
-var fixtureProjects = []catalog.Project{{Name: "dms"}, {Name: "eudi"}, {Name: "url-shortener"}, {Name: "landing"}}
+var fixtureProjects = []catalog.Project{{Name: "acme"}, {Name: "globex"}, {Name: "umbrella-corp"}, {Name: "landing"}}
 
 func fixtureCatalog(t *testing.T) *catalog.Config {
 	t.Helper()
@@ -159,30 +159,30 @@ func TestTunnelHostsArePinned(t *testing.T) {
 			"otlp.example.com",
 		},
 		"devel": {
-			"dms.devel.example.com",
-			"eudi.devel.example.com",
+			"acme.devel.example.com",
+			"globex.devel.example.com",
 			"headlamp.devel.example.com",
 			"old.devel.example.com",
 			"otlp.devel.example.com",
-			"url-shortener.devel.example.com",
+			"umbrella-corp.devel.example.com",
 			"gemaal.example.com",
-			"*.eudi.devel.example.com",
+			"*.globex.devel.example.com",
 			"*.devel.example.com",
 		},
 		"stage": {
-			"dms.stage.example.com",
-			"eudi.stage.example.com",
+			"acme.stage.example.com",
+			"globex.stage.example.com",
 			"headlamp.stage.example.com",
-			"url-shortener.stage.example.com",
+			"umbrella-corp.stage.example.com",
 			// The foreign host: an exact name of its own zone, last in
 			// DNS canonical order.
 			"ssi.example.org",
 		},
 		"prod": {
-			"dms.prod.example.com",
-			"eudi.prod.example.com",
+			"acme.prod.example.com",
+			"globex.prod.example.com",
 			"headlamp.prod.example.com",
-			"url-shortener.prod.example.com",
+			"umbrella-corp.prod.example.com",
 		},
 		"devel-partner": {"landing.devel.example.net"},
 		"stage-partner": {"landing.stage.example.net"},
@@ -217,7 +217,7 @@ func TestDNSElsewhereKeepsTheRuleAndDropsTheRecord(t *testing.T) {
 	assert.Len(t, devel.DNSNames(), len(devel.Hosts)-1)
 	assert.True(t, devel.CarriesIn("example.com", "old.devel.example.com"))
 	assert.False(t, devel.OwnsRecord("example.com", "old.devel.example.com"))
-	assert.True(t, devel.OwnsRecord("example.com", "dms.devel.example.com"))
+	assert.True(t, devel.OwnsRecord("example.com", "acme.devel.example.com"))
 
 	for _, tun := range c.Tunnels {
 		if tun.Name() != "devel" {
@@ -233,7 +233,7 @@ func TestDNSElsewhereKeepsTheRuleAndDropsTheRecord(t *testing.T) {
 		_, err := config.Load(fstest.MapFS{config.FileName: {Data: []byte(withRecord)}}, fixtureCatalog(t), fixtureProjects)
 		require.NoError(t, err)
 
-		onACarriedName := strings.Replace(withRecord, "name: old.devel.example.com", "name: dms.devel.example.com", 1)
+		onACarriedName := strings.Replace(withRecord, "name: old.devel.example.com", "name: acme.devel.example.com", 1)
 		_, err = config.Load(fstest.MapFS{config.FileName: {Data: []byte(onACarriedName)}}, fixtureCatalog(t), fixtureProjects)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "already carries this host")
@@ -777,7 +777,7 @@ func TestValidate_DomainRouting(t *testing.T) {
 	})
 
 	t.Run("deeper exact host shadowed by earlier wildcard", func(t *testing.T) {
-		c := validConfig("*.example.com", "a.eudi.devel.example.com")
+		c := validConfig("*.example.com", "a.globex.devel.example.com")
 		err := c.Validate()
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "shadowed")
@@ -785,7 +785,7 @@ func TestValidate_DomainRouting(t *testing.T) {
 
 	t.Run("OrderHosts output always validates", func(t *testing.T) {
 		c := validConfig(edgespec.OrderHosts([]string{
-			"*.example.com", "*.devel.example.com", "a.eudi.devel.example.com", "*.eudi.devel.example.com", "argocd.example.com",
+			"*.example.com", "*.devel.example.com", "a.globex.devel.example.com", "*.globex.devel.example.com", "argocd.example.com",
 		})...)
 		assert.NoError(t, c.Validate())
 	})
@@ -882,15 +882,15 @@ func TestCacheHostsArePinned(t *testing.T) {
 	require.NotNil(t, zone.Cache, "the zone declares a cache policy")
 
 	assert.Equal(t, []string{
-		"dms.devel.example.com",
-		"dms.prod.example.com",
-		"dms.stage.example.com",
-		"eudi.devel.example.com",
-		"eudi.prod.example.com",
-		"eudi.stage.example.com",
-		"url-shortener.devel.example.com",
-		"url-shortener.prod.example.com",
-		"url-shortener.stage.example.com",
+		"acme.devel.example.com",
+		"acme.prod.example.com",
+		"acme.stage.example.com",
+		"globex.devel.example.com",
+		"globex.prod.example.com",
+		"globex.stage.example.com",
+		"umbrella-corp.devel.example.com",
+		"umbrella-corp.prod.example.com",
+		"umbrella-corp.stage.example.com",
 	}, zone.CacheHosts)
 
 	// The consoles, named so the reason is not only in a comment.
@@ -947,9 +947,9 @@ func TestRateLimitsArePinned(t *testing.T) {
 
 	rule := rl.Rules[0]
 	assert.Equal(t, []config.EndpointCfg{
-		{Host: "url-shortener.devel.example.com", Path: "/faro/collect"},
-		{Host: "url-shortener.stage.example.com", Path: "/faro/collect"},
-		{Host: "url-shortener.prod.example.com", Path: "/faro/collect"},
+		{Host: "umbrella-corp.devel.example.com", Path: "/faro/collect"},
+		{Host: "umbrella-corp.stage.example.com", Path: "/faro/collect"},
+		{Host: "umbrella-corp.prod.example.com", Path: "/faro/collect"},
 		{Host: "access.example.com", Path: "/login/recovery"},
 	}, rule.Endpoints)
 	assert.Equal(t, []string{"ip.src"}, rule.Characteristics)
