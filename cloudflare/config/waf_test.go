@@ -50,7 +50,7 @@ func TestWAFHostsAreDerivedFromTheCatalog(t *testing.T) {
 	assert.Contains(t, z.WAFHosts, "example.com")
 	assert.NotContains(t, z.WAFHosts, "landing.devel.example.net")
 	assert.NotContains(t, z.WAFHosts, "*.devel.example.com")
-	assert.NotContains(t, z.WAFHosts, "*.eudi.devel.example.com")
+	assert.NotContains(t, z.WAFHosts, "*.globex.devel.example.com")
 }
 
 func TestWAFOptOutRemovesTheNameAndNeedsAReason(t *testing.T) {
@@ -58,7 +58,7 @@ func TestWAFOptOutRemovesTheNameAndNeedsAReason(t *testing.T) {
 		"gemaal: {domains: [{host: gemaal.example.com, waf: off, waf_reason: raw uploads}], route_namespaces: [gemaal]}"})
 	require.NoError(t, err)
 	assert.NotContains(t, c.Zones["example.com"].WAFHosts, "gemaal.example.com")
-	assert.Contains(t, c.Zones["example.com"].WAFHosts, "dms.devel.example.com")
+	assert.Contains(t, c.Zones["example.com"].WAFHosts, "acme.devel.example.com")
 
 	_, err = loadWith(t, [2]string{}, [2]string{"gemaal: {domains: [gemaal.example.com], route_namespaces: [gemaal]}",
 		"gemaal: {domains: [{host: gemaal.example.com, waf: off}], route_namespaces: [gemaal]}"})
@@ -147,7 +147,7 @@ func TestAddWAFHostsTakesExactNamesOfTheZone(t *testing.T) {
 	c := fixture(t)
 	before := len(c.Zones["example.com"].WAFHosts)
 
-	require.NoError(t, c.AddWAFHosts("example.com", "status.example.com", "dms.devel.example.com"))
+	require.NoError(t, c.AddWAFHosts("example.com", "status.example.com", "acme.devel.example.com"))
 
 	hosts := c.Zones["example.com"].WAFHosts
 	assert.Len(t, hosts, before+1, "a name already covered is not repeated")
@@ -173,12 +173,12 @@ func TestDerivedManagedWAFExpressionIsPinned(t *testing.T) {
 	contribs, err := fixture(t).Zones["example.com"].Contributions()
 	require.NoError(t, err)
 
-	assert.Equal(t, `http.host in {"access.example.com" "alert-ingress.example.com" "alertmanager.example.com" "argocd.example.com" `+
-		`"dms.devel.example.com" "dms.prod.example.com" "dms.stage.example.com" "eudi.devel.example.com" "eudi.prod.example.com" `+
-		`"eudi.stage.example.com" "example.com" "gemaal.example.com" "grafana.example.com" "headlamp.devel.example.com" `+
-		`"headlamp.kernel.example.com" "headlamp.prod.example.com" "headlamp.stage.example.com" "mcp.example.com" `+
-		`"old.devel.example.com" "otlp.devel.example.com" "otlp.example.com" "url-shortener.devel.example.com" `+
-		`"url-shortener.prod.example.com" "url-shortener.stage.example.com"}`, wafExpression(t, contribs))
+	assert.Equal(t, `http.host in {"access.example.com" "acme.devel.example.com" "acme.prod.example.com" "acme.stage.example.com" `+
+		`"alert-ingress.example.com" "alertmanager.example.com" "argocd.example.com" "example.com" "gemaal.example.com" `+
+		`"globex.devel.example.com" "globex.prod.example.com" "globex.stage.example.com" "grafana.example.com" `+
+		`"headlamp.devel.example.com" "headlamp.kernel.example.com" "headlamp.prod.example.com" "headlamp.stage.example.com" `+
+		`"mcp.example.com" "old.devel.example.com" "otlp.devel.example.com" "otlp.example.com" "umbrella-corp.devel.example.com" `+
+		`"umbrella-corp.prod.example.com" "umbrella-corp.stage.example.com"}`, wafExpression(t, contribs))
 }
 
 func TestAnExpressionOverCloudflaresLimitIsRefused(t *testing.T) {

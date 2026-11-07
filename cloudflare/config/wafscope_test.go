@@ -32,7 +32,7 @@ func TestScopeZoneRunsTheWAFOnTheWholeZoneMinusTheOptOuts(t *testing.T) {
 	// Exact opt-outs are one set; a wildcard opt-out (catalog or record) is a
 	// suffix test. A proxied wildcard that did not opt out is simply covered.
 	assert.Equal(t, `not (http.host in {"raw.example.com"} or ends_with(http.host, ".apps.example.com") `+
-		`or ends_with(http.host, ".devel.example.com") or ends_with(http.host, ".eudi.devel.example.com"))`,
+		`or ends_with(http.host, ".devel.example.com") or ends_with(http.host, ".globex.devel.example.com"))`,
 		wafExpression(t, contribs))
 }
 

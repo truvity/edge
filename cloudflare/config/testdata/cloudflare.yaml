@@ -64,9 +64,9 @@ zones:
       rules:
         - name: Browser telemetry ingest
           endpoints:
-            - {host: url-shortener.devel.example.com, path: /faro/collect}
-            - {host: url-shortener.stage.example.com, path: /faro/collect}
-            - {host: url-shortener.prod.example.com, path: /faro/collect}
+            - {host: umbrella-corp.devel.example.com, path: /faro/collect}
+            - {host: umbrella-corp.stage.example.com, path: /faro/collect}
+            - {host: umbrella-corp.prod.example.com, path: /faro/collect}
             - {host: access.example.com, path: /login/recovery}
           characteristics: [ip.src]
           period: 10

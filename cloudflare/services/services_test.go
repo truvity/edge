@@ -16,7 +16,7 @@ import (
 	"github.com/truvity/edge/v4/cloudflare/services"
 )
 
-var projects = []catalog.Project{{Name: "dms"}, {Name: "eudi"}, {Name: "url-shortener"}, {Name: "landing"}}
+var projects = []catalog.Project{{Name: "acme"}, {Name: "globex"}, {Name: "umbrella-corp"}, {Name: "landing"}}
 
 func fixture(t *testing.T) *config.Config {
 	t.Helper()
@@ -95,7 +95,7 @@ func TestDNSElsewhereKeepsTheIngressRuleAndDropsTheCNAME(t *testing.T) {
 	got := r.ByKey()
 	assert.Contains(t, fmt.Sprint(got[ingress+"ingress-devel"].Inputs), "old.devel.example.com")
 	assert.NotContains(t, got, record+"cname-devel-old-devel-example-com")
-	assert.Contains(t, got, record+"cname-devel-dms-devel-example-com")
+	assert.Contains(t, got, record+"cname-devel-acme-devel-example-com")
 }
 
 func TestOriginCNAMERewritesTheRecordContent(t *testing.T) {

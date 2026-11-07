@@ -35,7 +35,7 @@ import (
 // SSL-mode resources under their own provider, the origin CNAME rewrite);
 // the "after" is zonestack.Deploy and services.Deploy once per company.
 
-var fixtureProjects = []catalog.Project{{Name: "dms"}, {Name: "eudi"}, {Name: "url-shortener"}, {Name: "landing"}}
+var fixtureProjects = []catalog.Project{{Name: "acme"}, {Name: "globex"}, {Name: "umbrella-corp"}, {Name: "landing"}}
 
 func fixture(t *testing.T) *config.Config {
 	t.Helper()
