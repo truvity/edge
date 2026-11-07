@@ -116,7 +116,7 @@ func TestValidateRefusesEveryProblem(t *testing.T) {
 		rows []Row
 		want string
 	}{
-		"bad name":         {base(func(r *Row) { r.Name = "Hive_Edge" }), "lowercase letters"},
+		"bad name":         {base(func(r *Row) { r.Name = "Acme_Edge" }), "lowercase letters"},
 		"unknown kind":     {base(func(r *Row) { r.Kind = "admin" }), `kind "admin"`},
 		"unknown account":  {base(func(r *Row) { r.Account = "nobody" }), `no account "nobody"`},
 		"unknown zone":     {base(func(r *Row) { r.Zones = []string{"x.example"} }), `zone "x.example" is not a zone of account umbrella`},

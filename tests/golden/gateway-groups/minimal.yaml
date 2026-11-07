@@ -3,12 +3,12 @@
 apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:
-  name: url-shortener-example-com-tls
+  name: umbrella-corp-example-com-tls
   namespace: envoy-gateway-system
 spec:
-  secretName: url-shortener-example-com-tls
+  secretName: umbrella-corp-example-com-tls
   dnsNames:
-    - "url-shortener.example.com"
+    - "umbrella-corp.example.com"
   privateKey:
     rotationPolicy: Always
   issuerRef:
@@ -21,7 +21,7 @@ spec:
 apiVersion: gateway.networking.k8s.io/v1
 kind: ListenerSet
 metadata:
-  name: url-shortener
+  name: umbrella-corp
   namespace: envoy-gateway-system
 spec:
   parentRef:
@@ -38,14 +38,14 @@ spec:
           from: Selector
           selector:
             matchLabels:
-              gateway.example.com/route-grant-url-shortener: "true"
-      hostname: url-shortener.example.com
-      name: url-shortener-example-com
+              gateway.example.com/route-grant-umbrella-corp: "true"
+      hostname: umbrella-corp.example.com
+      name: umbrella-corp-example-com
       port: 443
       protocol: HTTPS
       tls:
         certificateRefs:
         - group: ""
           kind: Secret
-          name: url-shortener-example-com-tls
+          name: umbrella-corp-example-com-tls
         mode: Terminate
