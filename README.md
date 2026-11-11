@@ -49,10 +49,14 @@ at the tag's version. The Go module is `github.com/truvity/edge/v4`; the
 import paths changed from the two former repositories
 ([docs/cloudflare/adoption.md](docs/cloudflare/adoption.md#the-go-module-moves-to-edgev3)).
 
-**Patterns to come** (not shipped yet; each lands as a package or chart of
-this repository): a zone base, cluster and instance tunnels, AWS API
-Gateway as an exposure, a static-site profile, a Snippet path split at the
-Cloudflare edge, and an instance connector.
+The zone base (`cloudflare/zonestack`), the cluster tunnels
+(`cloudflare/services`), the instance tunnel (`cloudflare/instancetunnel`),
+AWS API Gateway as a front door (`cloudflare/awsapigw`), the static-site
+server and chart, and the instance connector (`cloudflare/instanceconnector`)
+have shipped; the stack entry points are described in
+[docs/cloudflare/stacks.md](docs/cloudflare/stacks.md). A path split at the
+Cloudflare edge is not part of this repository: a path is decided in Envoy,
+on one origin per hostname ([docs/gateway/host-routing.md](docs/gateway/host-routing.md)).
 
 ## Who it is for
 
@@ -175,6 +179,7 @@ before. See [docs/gateway/reference.md](docs/gateway/reference.md#shared-hosts-d
 
 ### The Cloudflare half
 
+```sh
 go get github.com/truvity/edge/v4@v4.0.0
 ```
 
@@ -486,13 +491,31 @@ which is what lets a browser that has not signed in, and an edge cache
 that holds no cookie, fetch them. [docs/gateway/reference.md](docs/gateway/reference.md#gateway-routes)
 has every input.
 
+## Platform part and company part
+
+**Platform part.** The platform admin applies the Envoy half on its clusters:
+`gateway-fleet`, `gateway-groups` and `gateway-policies` (or
+`gateway-projects`, which holds the last two), with the groups generated from
+the `catalog`, and one `cloudflared` per account and cluster, which reads its
+tunnel token from a Secret. The platform owns each exposure, each group (the
+hostnames it serves and the namespaces whose routes may attach) and the TLS
+floor. See [docs/gateway/adoption.md](docs/gateway/adoption.md).
+
+**Company part.** A company's SRE runs the Cloudflare half for the accounts
+and zones the company owns: `cloudflare/zonestack` for zones and
+`cloudflare/services` for tunnels and their DNS, both from the company's
+`cloudflare.yaml` ([docs/cloudflare/stacks.md](docs/cloudflare/stacks.md)).
+It writes the HTTPRoutes of its applications in its own namespaces, with
+`gateway-routes` in its charts, and attaches them to the ListenerSet of its
+group.
+
 ## Consumers
 
 Who uses this repository, and through which surface:
 
 | Consumer | Surface |
 | --- | --- |
-| truvity/gitops | Go `cloudflare/account`, `cloudflare/tunnel`, `cloudflare/zone`; charts `cloudflared`, `gateway-fleet`, `gateway-groups`, `gateway-policies` |
+| The maintainers' platform repository | Go `cloudflare/account`, `cloudflare/tunnel`, `cloudflare/zone`; charts `cloudflared`, `gateway-fleet`, `gateway-groups`, `gateway-policies` |
 | A second, non-AWS estate | Go `cloudflare/tunnel`; charts `cloudflared`, `gateway-fleet`, `gateway-policies` |
 
 ## Neighbours
@@ -572,9 +595,8 @@ Release and pushes all the charts at that version — a chart's own `version`
 field is a placeholder that never moves — and the same tag is the Go
 module's version.
 
-Auto-release is present but not armed (`vars.AUTO_RELEASE` is unset), so
-every release today is a manual tag. When armed it cuts **patches only**:
-at once for a merged `security`-labelled pull request, weekly for
+Auto-release is armed (`vars.AUTO_RELEASE` is `true`). It cuts **patches
+only**: at once for a merged `security`-labelled pull request, weekly for
 dependency bumps. Minors and majors are always manual, tagged when the
 change merges and after its CHANGELOG heading.
 
