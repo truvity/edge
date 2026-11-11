@@ -595,9 +595,8 @@ Release and pushes all the charts at that version — a chart's own `version`
 field is a placeholder that never moves — and the same tag is the Go
 module's version.
 
-Auto-release is present but not armed (`vars.AUTO_RELEASE` is unset), so
-every release today is a manual tag. When armed it cuts **patches only**:
-at once for a merged `security`-labelled pull request, weekly for
+Auto-release is armed (`vars.AUTO_RELEASE` is `true`). It cuts **patches
+only**: at once for a merged `security`-labelled pull request, weekly for
 dependency bumps. Minors and majors are always manual, tagged when the
 change merges and after its CHANGELOG heading.
 
