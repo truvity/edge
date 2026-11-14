@@ -1,0 +1,168 @@
+---
+# Source: static-site/templates/pdb.yaml
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: static-site
+  namespace: default
+  labels:
+    app.kubernetes.io/name: static-site
+    app.kubernetes.io/instance: static-site
+    app.kubernetes.io/version: "0.0.0"
+    app.kubernetes.io/managed-by: Helm
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: static-site
+      app.kubernetes.io/instance: static-site
+
+---
+# Source: static-site/templates/serviceaccount.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: static-site
+  namespace: default
+  labels:
+    app.kubernetes.io/name: static-site
+    app.kubernetes.io/instance: static-site
+    app.kubernetes.io/version: "0.0.0"
+    app.kubernetes.io/managed-by: Helm
+automountServiceAccountToken: false
+
+---
+# Source: static-site/templates/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: static-site
+  namespace: default
+  labels:
+    app.kubernetes.io/name: static-site
+    app.kubernetes.io/instance: static-site
+    app.kubernetes.io/version: "0.0.0"
+    app.kubernetes.io/managed-by: Helm
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: static-site
+    app.kubernetes.io/instance: static-site
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+      protocol: TCP
+    - name: ops
+      port: 8081
+      targetPort: ops
+      protocol: TCP
+
+---
+# Source: static-site/templates/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: static-site
+  namespace: default
+  labels:
+    app.kubernetes.io/name: static-site
+    app.kubernetes.io/instance: static-site
+    app.kubernetes.io/version: "0.0.0"
+    app.kubernetes.io/managed-by: Helm
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: static-site
+      app.kubernetes.io/instance: static-site
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: static-site
+        app.kubernetes.io/instance: static-site
+      annotations:
+        checksum/placeholders: 44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a
+    spec:
+      serviceAccountName: static-site
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 40
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: static-site
+          image: "ghcr.io/truvity/edge/static-site:0.0.0"
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          env:
+            - name: STATIC_SITE_ARTIFACT_REF
+              value: "registry.example.com/static/www"
+            - name: STATIC_SITE_ARTIFACT_DIGEST
+              value: "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+            - name: STATIC_SITE_CONTENT_DIR
+              value: /var/run/site
+            - name: STATIC_SITE_PLAIN_HTTP
+              value: "false"
+            - name: STATIC_SITE_SPA_FALLBACK
+              value: "false"
+            - name: STATIC_SITE_NOT_FOUND_PAGE
+              value: "404.html"
+            - name: STATIC_SITE_MAX_BYTES
+              value: "536870912"
+            - name: STATIC_SITE_MAX_FILES
+              value: "50000"
+            - name: STATIC_SITE_HTML_MAX_AGE
+              value: "60s"
+            - name: STATIC_SITE_STALE_WHILE_REVALIDATE
+              value: "300s"
+            - name: STATIC_SITE_CACHE_PRIVATE
+              value: "true"
+            - name: STATIC_SITE_LOG_LEVEL
+              value: "info"
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+            - name: ops
+              containerPort: 8081
+              protocol: TCP
+          # The artifact is pulled before the site port opens; startup
+          # allows for a slow registry without loosening liveness.
+          startupProbe:
+            httpGet:
+              path: /readyz
+              port: ops
+            periodSeconds: 2
+            failureThreshold: 90
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: ops
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: ops
+            periodSeconds: 5
+          resources:
+            limits:
+              memory: 256Mi
+            requests:
+              cpu: 25m
+              memory: 64Mi
+          volumeMounts:
+            - name: content
+              mountPath: /var/run/site
+      volumes:
+        - name: content
+          emptyDir:
+            medium: Memory
+            sizeLimit: "1Gi"

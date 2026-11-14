@@ -140,6 +140,11 @@ cache:
   # Everything else, HTML included.
   htmlMaxAge: 60s
   staleWhileRevalidate: 300s
+  # Every response, errors and redirects included, is Cache-Control:
+  # private, no-store, so no shared cache stores it. The TTL keys and
+  # hashedPattern are then ignored. The server does not authenticate: put
+  # access control in front of the site.
+  private: false
 
 # Response headers added to every response, over the defaults (nosniff,
 # X-Frame-Options DENY, a strict-origin-when-cross-origin referrer policy).

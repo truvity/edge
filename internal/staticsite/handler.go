@@ -38,10 +38,22 @@ func (h *Handler) setHeaders(w http.Header) {
 	}
 }
 
+// privateNoStore is the Cache-Control of every response when CachePrivate is on.
+const privateNoStore = "private, no-store"
+
+// noStore is the Cache-Control of a failure, and of every response under
+// CachePrivate.
+func (h *Handler) noStore() string {
+	if h.cfg.CachePrivate {
+		return privateNoStore
+	}
+	return "no-store"
+}
+
 func (h *Handler) fail(w http.ResponseWriter, code int, msg string) {
 	h.setHeaders(w.Header())
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Cache-Control", h.noStore())
 	w.WriteHeader(code)
 	_, _ = io.WriteString(w, msg+"\n")
 }
@@ -95,7 +107,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// Relative links in the page resolve against the slash form.
 		h.setHeaders(w.Header())
 		w.Header().Set("Location", key+"/")
-		w.Header().Set("Cache-Control", "public, max-age=3600")
+		if h.cfg.CachePrivate {
+			w.Header().Set("Cache-Control", privateNoStore)
+		} else {
+			w.Header().Set("Cache-Control", "public, max-age=3600")
+		}
 		w.WriteHeader(http.StatusMovedPermanently)
 		return
 	}
@@ -121,6 +137,8 @@ func (h *Handler) notFound(w http.ResponseWriter, r *http.Request, site *Site) {
 
 func (h *Handler) cacheControl(e *entry, status int) string {
 	switch {
+	case h.cfg.CachePrivate:
+		return privateNoStore
 	case status != http.StatusOK:
 		return "no-store"
 	case e.hashed:
