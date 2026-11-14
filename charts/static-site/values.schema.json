@@ -131,6 +131,7 @@
       "additionalProperties": false,
       "properties": {
         "hashedPattern": { "type": "string" },
+        "private": { "type": "boolean" },
         "htmlMaxAge": { "type": "string", "pattern": "^[0-9]+(ms|s|m|h)$" },
         "staleWhileRevalidate": { "type": "string", "pattern": "^[0-9]+(ms|s|m|h)$" }
       }

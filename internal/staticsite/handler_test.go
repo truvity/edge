@@ -92,6 +92,45 @@ func TestCacheControl(t *testing.T) {
 	assert.Equal(t, "public, max-age=5", get(h, "GET", "/").Header().Get("Cache-Control"))
 }
 
+func TestPrivateCacheControl(t *testing.T) {
+	const want = "private, no-store"
+	h := newTestHandler(t, site, func(c *Config) { c.CachePrivate = true })
+	cases := []struct {
+		name, method, path string
+		code               int
+	}{
+		{"html", "GET", "/", 200},
+		{"hashed", "GET", "/app.0123abcd.js", 200},
+		{"asset", "GET", "/logo.png", 200},
+		{"head", "HEAD", "/logo.png", 200},
+		{"redirect", "GET", "/docs", 301},
+		{"not found page", "GET", "/missing", 404},
+		{"method", "POST", "/", 405},
+	}
+	for _, tc := range cases {
+		w := get(h, tc.method, tc.path)
+		assert.Equal(t, tc.code, w.Code, tc.name)
+		assert.Equal(t, want, w.Header().Get("Cache-Control"), tc.name)
+	}
+
+	etag := get(h, "GET", "/").Header().Get("ETag")
+	require.NotEmpty(t, etag)
+	w := get(h, "GET", "/", "If-None-Match", etag)
+	assert.Equal(t, 304, w.Code)
+	assert.Equal(t, want, w.Header().Get("Cache-Control"))
+
+	cfg := Defaults()
+	cfg.CachePrivate = true
+	w = get(NewHandler(&cfg, NewMetrics()), "GET", "/")
+	assert.Equal(t, 503, w.Code)
+	assert.Equal(t, want, w.Header().Get("Cache-Control"))
+
+	// Default-off responses are unchanged.
+	h = newTestHandler(t, site, nil)
+	assert.Equal(t, "no-store", get(h, "GET", "/missing").Header().Get("Cache-Control"))
+	assert.Equal(t, "public, max-age=3600", get(h, "GET", "/docs").Header().Get("Cache-Control"))
+}
+
 func TestHTMLNeverImmutable(t *testing.T) {
 	h := newTestHandler(t, map[string]string{"index.html": "x", "page.0123abcd.html": "y"}, nil)
 	assert.NotContains(t, get(h, "GET", "/page.0123abcd.html").Header().Get("Cache-Control"), "immutable")
@@ -263,6 +302,7 @@ func TestFromEnv(t *testing.T) {
 		"STATIC_SITE_ARTIFACT_REF":       "registry.example.com/static/www:1",
 		"STATIC_SITE_ARTIFACT_DIGEST":    "sha256:" + strings.Repeat("a", 64),
 		"STATIC_SITE_HTML_MAX_AGE":       "30s",
+		"STATIC_SITE_CACHE_PRIVATE":      "true",
 		"STATIC_SITE_PLACEHOLDER_NAMES":  "gtm-id",
 		"STATIC_SITE_PLACEHOLDER_GTM_ID": "GTM-1",
 		"STATIC_SITE_HEADERS":            `{"X-Frame-Options":"SAMEORIGIN"}`,
@@ -272,6 +312,12 @@ func TestFromEnv(t *testing.T) {
 	assert.Equal(t, "GTM-1", c.Placeholders["gtm-id"])
 	assert.Equal(t, "SAMEORIGIN", c.Headers["X-Frame-Options"])
 	assert.Equal(t, "nosniff", c.Headers["X-Content-Type-Options"])
+	assert.True(t, c.CachePrivate)
+
+	env["STATIC_SITE_CACHE_PRIVATE"] = "yes"
+	_, err = FromEnv(func(k string) string { return env[k] })
+	assert.Error(t, err, "not a boolean")
+	env["STATIC_SITE_CACHE_PRIVATE"] = "true"
 
 	env["STATIC_SITE_ARTIFACT_DIGEST"] = "latest"
 	_, err = FromEnv(func(k string) string { return env[k] })

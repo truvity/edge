@@ -327,10 +327,11 @@ the log line names the call, not a credential.
 |---|---|
 | Content-Type | from a built-in table, then the host's types, else `application/octet-stream`. Never sniffed; `X-Content-Type-Options: nosniff` is sent |
 | ETag | strong, a hash of the bytes served (after substitution). `If-None-Match` answers 304. No `Last-Modified`, so replicas agree |
-| hashed names | `Cache-Control: public, max-age=31536000, immutable` when the base name matches `cache.hashedPattern` (default: a `.`, `-` or `_` then 8 or more hex digits then the extension, such as `app.3f9a1c2b.js`). HTML is never immutable |
-| everything else | `public, max-age=<cache.htmlMaxAge>` (default 60s) `, stale-while-revalidate=<cache.staleWhileRevalidate>` (default 300s) |
+| hashed names | `Cache-Control: public, max-age=31536000, immutable` when the base name matches `cache.hashedPattern` (default: a `.`, `-` or `_` then 8 or more hex digits then the extension, such as `app.3f9a1c2b.js`). HTML is never immutable. Unless `cache.private` |
+| everything else | `public, max-age=<cache.htmlMaxAge>` (default 60s) `, stale-while-revalidate=<cache.staleWhileRevalidate>` (default 300s). Unless `cache.private` |
+| private (`cache.private: true`, `STATIC_SITE_CACHE_PRIVATE`) | `Cache-Control: private, no-store` on every response: hashed names, HTML, redirects, the 404 page, 405 and 503 alike. A shared cache stores nothing, and the TTL keys and `hashedPattern` are ignored. The server does not authenticate, so access control must sit in front of it (for a consuming estate, its gateway's OIDC or JWT policy). ETag and 304 are unchanged |
 | directories | `/dir/` serves `/dir/index.html`; `/dir` redirects to `/dir/`; a directory with no index is a 404, never a listing |
-| 404 | `site.notFoundPage` (default `404.html`) with status 404 and `no-store`, else a plain 404 |
+| 404 | `site.notFoundPage` (default `404.html`) with status 404 and `no-store` (`private, no-store` when `cache.private`), else a plain 404 |
 | SPA | with `site.spaFallback`, an extensionless path that matches no file serves `/index.html` with 200; a missing asset is still a 404 |
 | methods | GET and HEAD; anything else is 405 |
 | paths | a `..` segment, NUL or backslash is a 400. Only files indexed from the unpacked tree can be served, and symlinks are not indexed |
@@ -339,6 +340,11 @@ the log line names the call, not a credential.
 There is no cache purge: a new site version has new hashed assets, and its HTML
 is stale for at most `htmlMaxAge` plus `staleWhileRevalidate`. The server does
 not compress; let the CDN do it.
+
+A private site (`cache.private`) is never stored by a shared cache, so it needs
+no purge and no TTL. A CDN cache rule that sets an edge TTL of its own (an
+`override_origin` rule) overrides the origin's `no-store`; a private host must
+not be matched by such a rule.
 
 ## Placeholders
 
@@ -482,6 +488,7 @@ works the same: the chart only mounts the Secret named by `secretName`.
 
 All server settings are `STATIC_SITE_*` environment variables, listed in
 `internal/staticsite/config.go`; the chart sets them from its values.
+`cache.private` renders `STATIC_SITE_CACHE_PRIVATE` only when true.
 `STATIC_SITE_DIR` serves a local directory instead of pulling, for development.
 
 ## The chart
@@ -491,7 +498,10 @@ is `sha256:…`; the digest wins over a tag. Replicas default to 2 with a
 PodDisruptionBudget of `minAvailable: 1`. `serviceMonitor.enabled` renders a
 ServiceMonitor for the ops port; `networkPolicy.enabled` allows ingress to the
 site and ops ports (restricted by `ingressFrom` and `metricsFrom` when set) and
-egress to DNS and HTTPS. `values.schema.json` is strict at the top level, and
+egress to DNS and HTTPS. `cache.private: true` makes every response `private, no-store`
+(see Serving). It does not authenticate: a consuming estate that serves a private
+site must put its sign-in in front of the site, and the server is then reachable
+only through that gateway. `values.schema.json` is strict at the top level, and
 every refusal has a fixture under `tests/invalid/static-site/`.
 
 ## Release

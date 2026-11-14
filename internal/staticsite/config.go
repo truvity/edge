@@ -58,6 +58,11 @@ type Config struct {
 	// not hashed.
 	HTMLMaxAge           time.Duration
 	StaleWhileRevalidate time.Duration
+	// CachePrivate sends Cache-Control: private, no-store on every response,
+	// the redirects included. Shared caches then store nothing. The TTLs and
+	// HashedPattern are unused while it is on. The server does not
+	// authenticate: access control must sit in front of it.
+	CachePrivate bool
 
 	SPAFallback  bool
 	NotFoundPage string // path inside the site, "" for a plain 404
@@ -127,6 +132,8 @@ var safeValue = regexp.MustCompile(`^[A-Za-z0-9 ._:/@#+=,~-]{0,512}$`)
 //	STATIC_SITE_PULL_TIMEOUT, _MAX_BYTES, _MAX_FILES
 //	STATIC_SITE_HASHED_PATTERN                   regexp, immutable file names
 //	STATIC_SITE_HTML_MAX_AGE, _STALE_WHILE_REVALIDATE   durations
+//	STATIC_SITE_CACHE_PRIVATE                    boolean; every response is
+//	                                             private, no-store
 //	STATIC_SITE_SPA_FALLBACK, _NOT_FOUND_PAGE
 //	STATIC_SITE_HEADERS                          JSON object, name -> value
 //	STATIC_SITE_PLACEHOLDERS_FILE                JSON object, name -> value
@@ -178,6 +185,7 @@ func FromEnv(getenv func(string) string) (Config, error) {
 	str("NOT_FOUND_PAGE", &c.NotFoundPage)
 	boolean("PLAIN_HTTP", &c.PlainHTTP)
 	boolean("SPA_FALLBACK", &c.SPAFallback)
+	boolean("CACHE_PRIVATE", &c.CachePrivate)
 	dur("PULL_TIMEOUT", &c.PullTimeout)
 	dur("HTML_MAX_AGE", &c.HTMLMaxAge)
 	dur("STALE_WHILE_REVALIDATE", &c.StaleWhileRevalidate)

@@ -28,7 +28,7 @@ func main() {
 		log.Error("invalid configuration", "error", err)
 		os.Exit(2)
 	}
-	log.Info("starting", "version", version, "addr", cfg.Addr, "ops_addr", cfg.OpsAddr)
+	log.Info("starting", "version", version, "addr", cfg.Addr, "ops_addr", cfg.OpsAddr, "cache_private", cfg.CachePrivate)
 	// Names only: a value is never logged.
 	log.Info("placeholders", "names", cfg.PlaceholderNames(), "strict", cfg.PlaceholderStrict)
 	if err := staticsite.NewServer(&cfg, log).Run(context.Background()); err != nil {

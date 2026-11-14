@@ -5,6 +5,12 @@ heading here is a patch cut automatically for dependency bumps alone; its
 GitHub Release lists them. The chart and the Go module are released
 together at every version.
 
+## v4.9.0
+
+### Added
+
+- **`static-site: cache.private` serves every response as `Cache-Control: private, no-store`.** Chart value `cache.private` (default `false`) sets `STATIC_SITE_CACHE_PRIVATE` on the server. With it on, every response (hashed names, HTML, redirects, the 404 page, 405 and 503) carries `private, no-store`, so a shared cache stores nothing; `htmlMaxAge`, `staleWhileRevalidate` and `hashedPattern` are then ignored. Off, the output is unchanged. The server does not authenticate: access control must sit in front of the site. See [docs/static-site.md](docs/static-site.md#serving).
+
 ## v4.8.1
 
 - Dependency updates.

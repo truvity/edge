@@ -92,6 +92,10 @@ spec:
               value: {{ .Values.cache.htmlMaxAge | quote }}
             - name: STATIC_SITE_STALE_WHILE_REVALIDATE
               value: {{ .Values.cache.staleWhileRevalidate | quote }}
+            {{- if .Values.cache.private }}
+            - name: STATIC_SITE_CACHE_PRIVATE
+              value: "true"
+            {{- end }}
             {{- with .Values.cache.hashedPattern }}
             - name: STATIC_SITE_HASHED_PATTERN
               value: {{ . | quote }}

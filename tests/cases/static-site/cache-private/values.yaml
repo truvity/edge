@@ -1,0 +1,8 @@
+# A private site: every response is Cache-Control: private, no-store. The
+# access control is in front of it, not in the server.
+site:
+  artifact:
+    ref: registry.example.com/static/www
+    digest: sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+cache:
+  private: true
