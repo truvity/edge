@@ -1,0 +1,14 @@
+# A role named in the project form {cluster}-{project}.{name}: the dot is
+# allowed in an IAM name and in a Kubernetes object name, so the ACK objects
+# carry it unchanged (platform ADR-042, owner decision 2026-11-16).
+installName: static-www
+registry:
+  auth: ecr
+  ack:
+    enabled: true
+    clusterName: example
+    rolePrefix: example-site.static-www
+    tags:
+      project: site
+    repositoryArns:
+      - arn:aws:ecr:eu-central-1:123456789012:repository/example

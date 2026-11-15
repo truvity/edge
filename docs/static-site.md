@@ -189,7 +189,8 @@ registry:
     repositoryArns:                            # required
       - arn:aws:ecr:eu-central-1:123456789012:repository/example
     # rolePrefix: example-default-static-site  # name of the Role and Policy;
-    #                                          # default <clusterName>-<namespace>-<installName>
+    #                                          # default <clusterName>-<namespace>-<installName>;
+    #                                          # a dot is allowed: example-project.static-site
     # tags: {project: example}                 # on the Role; `cluster` is always set
     # permissionsBoundary: arn:aws:iam::123456789012:policy/example-boundary
     # accountId: "123456789012"                # with region: pins the trust to

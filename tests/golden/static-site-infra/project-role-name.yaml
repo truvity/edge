@@ -1,0 +1,121 @@
+---
+# Source: static-site-infra/templates/serviceaccount.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: static-www-static-site
+  namespace: default
+  labels:
+    app.kubernetes.io/name: static-site
+    app.kubernetes.io/instance: static-www
+    app.kubernetes.io/version: "0.0.0"
+    app.kubernetes.io/managed-by: Helm
+  annotations:
+    "argocd.argoproj.io/sync-options": "Prune=false,Delete=false"
+    "argocd.argoproj.io/sync-wave": "-15"
+
+---
+# Source: static-site-infra/templates/ack.yaml
+apiVersion: iam.services.k8s.aws/v1alpha1
+kind: Role
+metadata:
+  name: example-site.static-www
+  namespace: default
+  labels:
+    app.kubernetes.io/name: static-site
+    app.kubernetes.io/instance: static-www
+    app.kubernetes.io/version: "0.0.0"
+    app.kubernetes.io/managed-by: Helm
+  annotations:
+    argocd.argoproj.io/sync-wave: "-25"
+    argocd.argoproj.io/sync-options: Prune=false,Delete=false
+    services.k8s.aws/adoption-policy: adopt-or-create
+spec:
+  name: example-site.static-www
+  description: "static-site default/static-www: workload role"
+  tags:
+    - key: cluster
+      value: "example"
+    - key: "project"
+      value: "site"
+  assumeRolePolicyDocument: |
+    {
+      "Version": "2012-10-17",
+      "Statement": [{
+        "Effect": "Allow",
+        "Principal": {"Service": "pods.eks.amazonaws.com"},
+        "Action": ["sts:AssumeRole", "sts:TagSession"],
+        "Condition": {
+          "StringEquals": {
+            "aws:RequestTag/kubernetes-namespace": "default",
+            "aws:RequestTag/kubernetes-service-account": "static-www-static-site"
+          }
+        }
+      }]
+    }
+  policyRefs:
+    - from:
+        name: example-site.static-www
+
+---
+# Source: static-site-infra/templates/ack.yaml
+apiVersion: eks.services.k8s.aws/v1alpha1
+kind: PodIdentityAssociation
+metadata:
+  name: example-site.static-www
+  namespace: default
+  labels:
+    app.kubernetes.io/name: static-site
+    app.kubernetes.io/instance: static-www
+    app.kubernetes.io/version: "0.0.0"
+    app.kubernetes.io/managed-by: Helm
+  annotations:
+    argocd.argoproj.io/sync-wave: "-20"
+    argocd.argoproj.io/sync-options: Prune=false,Delete=false
+spec:
+  clusterName: example
+  namespace: default
+  serviceAccount: static-www-static-site
+  roleRef:
+    from:
+      name: example-site.static-www
+
+---
+# Source: static-site-infra/templates/ack.yaml
+apiVersion: iam.services.k8s.aws/v1alpha1
+kind: Policy
+metadata:
+  name: example-site.static-www
+  namespace: default
+  labels:
+    app.kubernetes.io/name: static-site
+    app.kubernetes.io/instance: static-www
+    app.kubernetes.io/version: "0.0.0"
+    app.kubernetes.io/managed-by: Helm
+  annotations:
+    argocd.argoproj.io/sync-wave: "-30"
+    argocd.argoproj.io/sync-options: Prune=false,Delete=false
+    services.k8s.aws/adoption-policy: adopt-or-create
+spec:
+  name: example-site.static-www
+  description: "static-site default/static-www: ECR pull access"
+  policyDocument: |
+    {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Effect": "Allow",
+          "Action": ["ecr:GetAuthorizationToken"],
+          "Resource": "*"
+        },
+        {
+          "Effect": "Allow",
+          "Action": [
+            "ecr:BatchGetImage",
+            "ecr:GetDownloadUrlForLayer",
+            "ecr:BatchCheckLayerAvailability"
+          ],
+          "Resource": ["arn:aws:ecr:eu-central-1:123456789012:repository/example"]
+        }
+      ]
+    }
