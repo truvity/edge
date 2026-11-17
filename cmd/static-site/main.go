@@ -31,6 +31,9 @@ func main() {
 	log.Info("starting", "version", version, "addr", cfg.Addr, "ops_addr", cfg.OpsAddr, "cache_private", cfg.CachePrivate)
 	// Names only: a value is never logged.
 	log.Info("placeholders", "names", cfg.PlaceholderNames(), "strict", cfg.PlaceholderStrict)
+	if cfg.LiveDir != "" {
+		log.Info("live files", "dir", cfg.LiveDir, "files", cfg.LiveFiles, "interval", cfg.LiveInterval.String(), "max_bytes", cfg.LiveMaxBytes)
+	}
 	if err := staticsite.NewServer(&cfg, log).Run(context.Background()); err != nil {
 		log.Error("server stopped", "error", err)
 		os.Exit(1)

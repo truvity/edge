@@ -1,0 +1,7 @@
+site:
+  artifact:
+    ref: registry.example.com/static/www
+    digest: sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+extraContainers:
+  - name: static-site
+    image: registry.example.com/writer:1.0.0

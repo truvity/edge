@@ -93,6 +93,20 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- end -}}
 {{- end -}}
 
+{{- define "static-site.validateLive" -}}
+{{- if and .Values.live.enabled (not .Values.live.files) -}}
+{{- fail "live.enabled needs live.files: the file names served from the live volume" -}}
+{{- end -}}
+{{- if and .Values.live.files (not .Values.live.enabled) -}}
+{{- fail "live.files needs live.enabled" -}}
+{{- end -}}
+{{- range .Values.extraContainers -}}
+{{- if eq .name "static-site" -}}
+{{- fail "extraContainers: the name static-site is the server's" -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
 {{/*
 "true" when the pod's cloud identity is managed by the static-site-infra chart:
 it renders the ACK objects and the ServiceAccount, this chart only names the

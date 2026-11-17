@@ -19,6 +19,9 @@ type Metrics struct {
 	info     *prometheus.GaugeVec
 	loadedAt prometheus.Gauge
 	files    prometheus.Gauge
+
+	liveReloads  *prometheus.CounterVec
+	liveLoadedAt *prometheus.GaugeVec
 }
 
 // NewMetrics returns the series on a fresh registry.
@@ -38,8 +41,12 @@ func NewMetrics() *Metrics {
 			Name: "static_site_content_loaded_timestamp_seconds", Help: "When the served content was loaded."}),
 		files: prometheus.NewGauge(prometheus.GaugeOpts{
 			Name: "static_site_content_files", Help: "Files in the served content."}),
+		liveReloads: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "static_site_live_reloads_total", Help: "Changed live files read, by file and result (ok, invalid, error)."}, []string{"file", "result"}),
+		liveLoadedAt: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "static_site_live_loaded_timestamp_seconds", Help: "When the served version of a live file was accepted."}, []string{"file"}),
 	}
-	m.Reg.MustRegister(m.requests, m.latency, m.loads, m.info, m.loadedAt, m.files,
+	m.Reg.MustRegister(m.requests, m.latency, m.loads, m.info, m.loadedAt, m.files, m.liveReloads, m.liveLoadedAt,
 		collectors.NewGoCollector(), collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}))
 	return m
 }
@@ -55,6 +62,16 @@ func (m *Metrics) Loaded(s *Site) {
 	m.info.WithLabelValues(s.Digest).Set(1)
 	m.loadedAt.Set(float64(s.LoadedAt.Unix()))
 	m.files.Set(float64(len(s.files)))
+}
+
+// LiveReload counts one read of a live file whose content had changed.
+func (m *Metrics) LiveReload(file, result string) {
+	m.liveReloads.WithLabelValues(file, result).Inc()
+}
+
+// LiveLoaded records when the served version of a live file was accepted.
+func (m *Metrics) LiveLoaded(file string, at time.Time) {
+	m.liveLoadedAt.WithLabelValues(file).Set(float64(at.Unix()))
 }
 
 // Handler is the /metrics endpoint.
