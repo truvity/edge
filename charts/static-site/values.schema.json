@@ -54,6 +54,12 @@
         "pullSecretName": { "type": "string" },
         "plainHTTP": { "type": "boolean" },
         "spaFallback": { "type": "boolean" },
+        "contentTypes": {
+          "type": "object",
+          "description": "Content-Type of named files, over the one the extension gives",
+          "propertyNames": { "pattern": "^(/[A-Za-z0-9._~-]+)+$" },
+          "additionalProperties": { "type": "string", "pattern": "^[a-z0-9][a-z0-9.+-]*/[a-z0-9][a-z0-9.+-]*(; charset=utf-8)?$" }
+        },
         "notFoundPage": { "type": "string" },
         "maxBytes": { "type": "integer", "minimum": 1 },
         "maxFiles": { "type": "integer", "minimum": 1 },
@@ -77,7 +83,12 @@
             "accountId": { "type": "string", "pattern": "^([0-9]{12})?$" },
             "region": { "type": "string", "pattern": "^([a-z]{2}(-[a-z]+)+-[0-9]+)?$" },
             "tags": { "type": "object", "additionalProperties": { "type": "string" } },
-            "permissionsBoundary": { "type": "string", "pattern": "^(arn:aws[a-z-]*:iam::[0-9]{12}:policy/.+)?$" }
+            "permissionsBoundary": { "type": "string", "pattern": "^(arn:aws[a-z-]*:iam::[0-9]{12}:policy/.+)?$" },
+            "extraStatements": {
+              "type": "array",
+              "description": "static-site-infra's: more statements on the role's policy. Ignored here",
+              "items": { "type": "object" }
+            }
           }
         }
       }
@@ -134,6 +145,35 @@
         "private": { "type": "boolean" },
         "htmlMaxAge": { "type": "string", "pattern": "^[0-9]+(ms|s|m|h)$" },
         "staleWhileRevalidate": { "type": "string", "pattern": "^[0-9]+(ms|s|m|h)$" }
+      }
+    },
+    "live": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "files served from a memory-backed volume another container of the pod writes; re-read on a timer and checked before they are served",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "files": {
+          "type": "array",
+          "maxItems": 16,
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$" }
+        },
+        "interval": { "type": "string", "pattern": "^[1-9][0-9]*(s|m)$" },
+        "maxBytes": { "type": "integer", "minimum": 1, "maximum": 1048576 },
+        "sizeLimit": { "type": "string", "pattern": "^[1-9][0-9]*(Ki|Mi)$" }
+      }
+    },
+    "extraContainers": {
+      "type": "array",
+      "description": "more containers in the pod, verbatim",
+      "items": {
+        "type": "object",
+        "required": ["name", "image"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1 },
+          "image": { "type": "string", "minLength": 1 }
+        }
       }
     },
     "headers": { "type": "object", "additionalProperties": { "type": "string" } },

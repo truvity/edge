@@ -1,0 +1,19 @@
+# The role also lets a second container of the pod read one configuration:
+# extra statements follow the ECR ones in the same policy.
+registry:
+  auth: ecr
+  ack:
+    enabled: true
+    clusterName: example
+    repositoryArns:
+      - arn:aws:ecr:eu-central-1:123456789012:repository/example
+    extraStatements:
+      - Sid: ReadFlags
+        Effect: Allow
+        Action:
+          - appconfig:StartConfigurationSession
+          - appconfig:GetLatestConfiguration
+        Resource:
+          - arn:aws:appconfig:eu-central-1:123456789012:application/abc1234/environment/def5678/configuration/ghi9012
+serviceAccount:
+  name: static-site

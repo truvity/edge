@@ -83,6 +83,9 @@ spec:
           ],
           "Resource": {{ $ack.repositoryArns | toJson }}
         }
+        {{- range $ack.extraStatements }},
+        {{ toJson . }}
+        {{- end }}
       ]
     }
 ---

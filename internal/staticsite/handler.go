@@ -18,6 +18,7 @@ import (
 type Handler struct {
 	cfg  *Config
 	site atomic.Pointer[Site]
+	live *Live
 	m    *Metrics
 }
 
@@ -26,6 +27,9 @@ func NewHandler(cfg *Config, m *Metrics) *Handler { return &Handler{cfg: cfg, m:
 
 // Set swaps in a new snapshot.
 func (h *Handler) Set(s *Site) { h.site.Store(s) }
+
+// SetLive attaches the live files. Call it before the handler serves.
+func (h *Handler) SetLive(l *Live) { h.live = l }
 
 // Site returns the current snapshot, nil before the first load.
 func (h *Handler) Site() *Site { return h.site.Load() }
@@ -91,6 +95,16 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	p, ok := cleanPath(r.URL.Path)
 	if !ok {
 		h.fail(w, http.StatusBadRequest, "bad path")
+		return
+	}
+	if h.live.Listed(p) {
+		// A live name never falls through to the artifact, the SPA fallback
+		// or the 404 page: a client polling it gets the file or a plain 404.
+		if f := h.live.file(p); f != nil {
+			h.serveLive(w, r, f)
+		} else {
+			h.fail(w, http.StatusNotFound, "not found")
+		}
 		return
 	}
 	key := strings.TrimSuffix(p, "/")
@@ -184,4 +198,15 @@ func (h *Handler) serve(w http.ResponseWriter, r *http.Request, e *entry, status
 	}
 	defer func() { _ = f.Close() }()
 	http.ServeContent(w, r, "", time.Time{}, f)
+}
+
+// serveLive answers with the accepted version of a live file. It is never
+// cached: the point of a live file is that it changes without a release.
+func (h *Handler) serveLive(w http.ResponseWriter, r *http.Request, f *liveFile) {
+	hd := w.Header()
+	h.setHeaders(hd)
+	hd.Set("Content-Type", f.ctype)
+	hd.Set("Cache-Control", h.noStore())
+	hd.Set("ETag", f.etag)
+	http.ServeContent(w, r, "", time.Time{}, bytes.NewReader(f.body))
 }

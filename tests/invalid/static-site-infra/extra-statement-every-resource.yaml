@@ -1,0 +1,11 @@
+registry:
+  auth: ecr
+  ack:
+    enabled: true
+    clusterName: example
+    repositoryArns:
+      - arn:aws:ecr:eu-central-1:123456789012:repository/example
+    extraStatements:
+      - Effect: Allow
+        Action: ["s3:GetObject"]
+        Resource: ["*"]

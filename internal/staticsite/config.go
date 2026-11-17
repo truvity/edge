@@ -67,6 +67,11 @@ type Config struct {
 	SPAFallback  bool
 	NotFoundPage string // path inside the site, "" for a plain 404
 
+	// ContentTypes sets the Content-Type of named paths ("/a/b"), over the
+	// one the extension gives. It is for a file whose name carries no
+	// extension but whose type a client insists on.
+	ContentTypes map[string]string
+
 	// Headers are added to every response; a value of "" removes a default.
 	Headers map[string]string
 
@@ -79,6 +84,16 @@ type Config struct {
 	// PlaceholderStrict makes a token the content carries fail the load when
 	// its name is unknown or has no value, instead of staying as written.
 	PlaceholderStrict bool
+
+	// LiveDir is a directory of live files: files that are not in the
+	// artifact, written by something beside the server, and re-read every
+	// LiveInterval. Only the names in LiveFiles are served, each at the site
+	// root (/name). A file is checked before it is served (LiveMaxBytes, and
+	// a JSON file must parse); one that fails keeps its last good version.
+	LiveDir      string
+	LiveFiles    []string
+	LiveInterval time.Duration
+	LiveMaxBytes int64
 
 	ShutdownDelay time.Duration
 }
@@ -107,6 +122,8 @@ func Defaults() Config {
 		StaleWhileRevalidate: 300 * time.Second,
 		NotFoundPage:         "404.html",
 		Headers:              DefaultHeaders(),
+		LiveInterval:         DefaultLiveInterval,
+		LiveMaxBytes:         DefaultLiveMaxBytes,
 		ShutdownDelay:        5 * time.Second,
 	}
 }
@@ -117,6 +134,10 @@ var placeholderName = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_-]{0,63}$`)
 // reason a value cannot break out of an attribute, a string or a stylesheet;
 // the per-type escaping is a second line behind it.
 var safeValue = regexp.MustCompile(`^[A-Za-z0-9 ._:/@#+=,~-]{0,512}$`)
+
+// mediaType is what a configured Content-Type may be: a plain type/subtype,
+// with the one parameter a text type needs. It cannot carry a header break.
+var mediaType = regexp.MustCompile(`^[a-z0-9][a-z0-9.+-]*/[a-z0-9][a-z0-9.+-]*(; charset=utf-8)?$`)
 
 // FromEnv reads the configuration from getenv (os.Getenv in main).
 //
@@ -135,6 +156,9 @@ var safeValue = regexp.MustCompile(`^[A-Za-z0-9 ._:/@#+=,~-]{0,512}$`)
 //	STATIC_SITE_CACHE_PRIVATE                    boolean; every response is
 //	                                             private, no-store
 //	STATIC_SITE_SPA_FALLBACK, _NOT_FOUND_PAGE
+//	STATIC_SITE_CONTENT_TYPES                    JSON object, path -> type,
+//	                                             for files the extension
+//	                                             does not type
 //	STATIC_SITE_HEADERS                          JSON object, name -> value
 //	STATIC_SITE_PLACEHOLDERS_FILE                JSON object, name -> value
 //	STATIC_SITE_PLACEHOLDER_NAMES                comma list; the value of NAME
@@ -145,6 +169,11 @@ var safeValue = regexp.MustCompile(`^[A-Za-z0-9 ._:/@#+=,~-]{0,512}$`)
 //	STATIC_SITE_PLACEHOLDERS_OPTIONAL_KEYS       comma list; absent means ""
 //	STATIC_SITE_PLACEHOLDERS_STRICT              unknown or valueless tokens
 //	                                             fail the load
+//	STATIC_SITE_LIVE_DIR                         a directory of live files
+//	STATIC_SITE_LIVE_FILES                       comma list of the file names
+//	                                             served from it, at the root
+//	STATIC_SITE_LIVE_INTERVAL                    how often they are re-read
+//	STATIC_SITE_LIVE_MAX_BYTES                   the largest one accepted
 //	STATIC_SITE_SHUTDOWN_DELAY
 func FromEnv(getenv func(string) string) (Config, error) {
 	c := Defaults()
@@ -190,6 +219,17 @@ func FromEnv(getenv func(string) string) (Config, error) {
 	dur("HTML_MAX_AGE", &c.HTMLMaxAge)
 	dur("STALE_WHILE_REVALIDATE", &c.StaleWhileRevalidate)
 	dur("SHUTDOWN_DELAY", &c.ShutdownDelay)
+	str("LIVE_DIR", &c.LiveDir)
+	c.LiveFiles = splitList(getenv("STATIC_SITE_LIVE_FILES"))
+	dur("LIVE_INTERVAL", &c.LiveInterval)
+	if v := getenv("STATIC_SITE_LIVE_MAX_BYTES"); v != "" {
+		n, err := strconv.ParseInt(v, 10, 64)
+		if err != nil || n <= 0 {
+			errs = append(errs, fmt.Errorf("STATIC_SITE_LIVE_MAX_BYTES: %q is not a positive integer", v))
+		} else {
+			c.LiveMaxBytes = n
+		}
+	}
 	if v := getenv("STATIC_SITE_MAX_BYTES"); v != "" {
 		n, err := strconv.ParseInt(v, 10, 64)
 		if err != nil || n <= 0 {
@@ -221,6 +261,11 @@ func FromEnv(getenv func(string) string) (Config, error) {
 		}
 		for k, val := range h {
 			c.Headers[k] = val
+		}
+	}
+	if v := getenv("STATIC_SITE_CONTENT_TYPES"); v != "" {
+		if err := json.Unmarshal([]byte(v), &c.ContentTypes); err != nil {
+			errs = append(errs, fmt.Errorf("STATIC_SITE_CONTENT_TYPES: %w", err))
 		}
 	}
 	c.Placeholders = map[string]string{}
@@ -351,10 +396,61 @@ func (c *Config) Validate() error {
 			errs = append(errs, fmt.Errorf("placeholder %q: value has characters outside the safe set [A-Za-z0-9 ._:/@#+=,~-] or is longer than 512", name))
 		}
 	}
+	errs = append(errs, c.validateLive()...)
+	errs = append(errs, validateContentTypes(c)...)
 	for k := range c.Headers {
 		if k == "" || strings.ContainsAny(k, " \t\r\n:") {
 			errs = append(errs, fmt.Errorf("header name %q is invalid", k))
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// validateLive checks the live-file settings. The names are an allowlist of
+// what is served from a directory another process writes, so each must be a
+// plain file name and the list must be explicit.
+func (c *Config) validateLive() []error {
+	var errs []error
+	if (c.LiveDir == "") != (len(c.LiveFiles) == 0) {
+		return append(errs, errors.New("STATIC_SITE_LIVE_DIR and STATIC_SITE_LIVE_FILES are set together or not at all"))
+	}
+	if c.LiveDir == "" {
+		return nil
+	}
+	if len(c.LiveFiles) > maxLiveFiles {
+		errs = append(errs, fmt.Errorf("STATIC_SITE_LIVE_FILES lists %d names; at most %d", len(c.LiveFiles), maxLiveFiles))
+	}
+	seen := map[string]bool{}
+	for _, n := range c.LiveFiles {
+		if !liveName.MatchString(n) {
+			errs = append(errs, fmt.Errorf("live file name %q is not a plain file name ([A-Za-z0-9][A-Za-z0-9._-]{0,127})", n))
+		}
+		if seen[n] {
+			errs = append(errs, fmt.Errorf("live file name %q is listed twice", n))
+		}
+		seen[n] = true
+	}
+	if c.LiveInterval < minLiveInterval {
+		errs = append(errs, fmt.Errorf("STATIC_SITE_LIVE_INTERVAL: %s is shorter than %s", c.LiveInterval, minLiveInterval))
+	}
+	if c.LiveMaxBytes <= 0 {
+		errs = append(errs, errors.New("STATIC_SITE_LIVE_MAX_BYTES must be positive"))
+	}
+	return errs
+}
+
+// validateContentTypes checks the configured Content-Type overrides: each
+// path is the key a file is indexed under, and each type is a plain media
+// type, so the value cannot smuggle a second header.
+func validateContentTypes(c *Config) []error {
+	var errs []error
+	for p, t := range c.ContentTypes {
+		if key, ok := cleanPath(p); !ok || key != p || strings.HasSuffix(p, "/") {
+			errs = append(errs, fmt.Errorf("content type path %q is not a clean absolute file path", p))
+		}
+		if !mediaType.MatchString(t) {
+			errs = append(errs, fmt.Errorf("content type of %q: %q is not type/subtype, optionally with ; charset=utf-8", p, t))
+		}
+	}
+	return errs
 }

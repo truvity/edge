@@ -1,0 +1,35 @@
+# Live files: a second container keeps flags.json current in the memory-backed
+# volume `live`; the server serves it at /flags.json, checked and never cached.
+# And a file with no extension that a client wants as JSON.
+site:
+  artifact:
+    ref: registry.example.com/static/www
+    digest: sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+  spaFallback: true
+  contentTypes:
+    /.well-known/apple-app-site-association: application/json
+live:
+  enabled: true
+  files:
+    - flags.json
+  interval: 5s
+extraContainers:
+  - name: flags-writer
+    image: registry.example.com/flags-writer:1.0.0@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+    env:
+      - name: WRITE_TO
+        value: /var/run/live/flags.json
+    securityContext:
+      allowPrivilegeEscalation: false
+      readOnlyRootFilesystem: true
+      capabilities:
+        drop: ["ALL"]
+    resources:
+      requests:
+        cpu: 10m
+        memory: 32Mi
+      limits:
+        memory: 64Mi
+    volumeMounts:
+      - name: live
+        mountPath: /var/run/live

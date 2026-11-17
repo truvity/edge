@@ -5,6 +5,15 @@ heading here is a patch cut automatically for dependency bumps alone; its
 GitHub Release lists them. The chart and the Go module are released
 together at every version.
 
+## v4.10.0
+
+### Added
+
+- **`static-site`: live files, served from a directory another container of the pod writes.** `live.enabled` with `live.files` (chart) or `STATIC_SITE_LIVE_DIR` with `STATIC_SITE_LIVE_FILES` (server) serves each listed name at the site root with `Cache-Control: no-store`. The server re-reads the files every `live.interval` (default `5s`) and checks each before serving it: a regular file, not empty, at most `live.maxBytes` (default 65536), and valid JSON for `.json`. A file that fails, or disappears, keeps its last accepted version; a name with none yet answers 404. Placeholders are not substituted in a live file, and a listed name is never served from the artifact. New metrics: `static_site_live_reloads_total{file,result}` and `static_site_live_loaded_timestamp_seconds{file}`. Off by default: existing renders and responses are unchanged. See [docs/static-site.md](docs/static-site.md#live-files).
+- **`static-site`: `site.contentTypes` sets the Content-Type of named files.** A map of path to type (`STATIC_SITE_CONTENT_TYPES` on the server), over the type the extension gives. It is for a file with no extension that a client wants typed, such as `/.well-known/apple-app-site-association` as `application/json`; without it such a file is `application/octet-stream`, as before. See [docs/static-site.md](docs/static-site.md#serving).
+- **`static-site`: `extraContainers`.** More containers in the pod, rendered verbatim, for the writer of the live files. The chart adds the memory-backed volume `live` when `live.enabled`; the writer mounts it by that name.
+- **`static-site-infra`: `registry.ack.extraStatements`.** More statements on the role's policy, after the ECR ones, for what a second container of the pod calls. `Allow` only, explicit actions and resource ARNs; a `*` action or resource is refused. Empty by default, and the policy document is then unchanged.
+
 ## v4.9.1
 
 - Dependency updates.

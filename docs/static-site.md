@@ -326,7 +326,7 @@ the log line names the call, not a credential.
 
 | | |
 |---|---|
-| Content-Type | from a built-in table, then the host's types, else `application/octet-stream`. Never sniffed; `X-Content-Type-Options: nosniff` is sent |
+| Content-Type | from a built-in table, then the host's types, else `application/octet-stream`. Never sniffed; `X-Content-Type-Options: nosniff` is sent. `site.contentTypes` (`STATIC_SITE_CONTENT_TYPES`, a JSON object of path to type) sets it for named files, for one with no extension that a client wants typed: `/.well-known/apple-app-site-association: application/json`. A type is `type/subtype`, optionally `; charset=utf-8`; a path that is not in the site is ignored |
 | ETag | strong, a hash of the bytes served (after substitution). `If-None-Match` answers 304. No `Last-Modified`, so replicas agree |
 | hashed names | `Cache-Control: public, max-age=31536000, immutable` when the base name matches `cache.hashedPattern` (default: a `.`, `-` or `_` then 8 or more hex digits then the extension, such as `app.3f9a1c2b.js`). HTML is never immutable. Unless `cache.private` |
 | everything else | `public, max-age=<cache.htmlMaxAge>` (default 60s) `, stale-while-revalidate=<cache.staleWhileRevalidate>` (default 300s). Unless `cache.private` |
@@ -472,11 +472,55 @@ spec:
 A plain `kubectl create secret generic static-site-values --from-literal=gtmId=...`
 works the same: the chart only mounts the Secret named by `secretName`.
 
+## Live files
+
+Everything else the server serves comes from the artifact and never changes
+between loads. Live files are the exception: a short, explicit list of small
+files that something beside the server keeps current, for what has to change
+without a release (a feature-flag file, a status banner).
+
+```yaml
+live:
+  enabled: true
+  files: [flags.json]        # served at /flags.json
+extraContainers:
+  - name: flags-writer       # writes /var/run/live/flags.json
+    image: registry.example.com/flags-writer:1.0.0
+    volumeMounts:
+      - name: live
+        mountPath: /var/run/live
+```
+
+The chart adds a memory-backed volume `live`, mounted read-only in the server
+at `/var/run/live`; the writer is a container of the same pod that mounts the
+same volume. `extraContainers` is rendered verbatim, and the pod's
+`securityContext` applies to it. When the writer calls a cloud API, give the
+role what it needs with `registry.ack.extraStatements` of `static-site-infra`
+(`Allow` only, explicit resource ARNs).
+
+| | |
+|---|---|
+| names | only the names in `live.files` (`STATIC_SITE_LIVE_FILES`), each a plain file name, at most 16. Each is served at the site root, `/<name>`. Any other file in the directory is never served |
+| reading | the server reads the files every `live.interval` (default `5s`, `STATIC_SITE_LIVE_INTERVAL`) and holds the accepted bytes in memory. A request never reads from disk |
+| checks | a file is accepted when it is a regular file (a symbolic link is refused), not empty, at most `live.maxBytes` (default 65536, `STATIC_SITE_LIVE_MAX_BYTES`) and, for `.json` and `.webmanifest`, one whole JSON value |
+| a file that fails | is ignored and the last accepted version keeps being served. So does a file that disappears. How the writer writes, in place or by rename, therefore does not matter |
+| before the first good file | the name answers a plain 404 (never the 404 page, never the SPA fallback). Readiness does not wait for live files |
+| response | `Cache-Control: no-store` (`private, no-store` with `cache.private`), a strong ETag of the bytes, the content type of the extension, and the same security headers as the site. `If-None-Match` answers 304 |
+| placeholders | never substituted in a live file |
+| a name in both | a listed name is served from the live directory only; the artifact's file of that name is not served, and the load logs a warning |
+| replicas | each pod has its own writer and its own copy, so two replicas can differ for one interval |
+
+A live file is public like the rest of the site: list only names whose content
+may be read by anyone who can reach it.
+
 ## Operations
 
 - Site port 8080, ops port 8081: `/healthz` (process up), `/readyz` (content
   loaded and not shutting down), `/metrics` (Prometheus: requests, duration,
-  loads, `static_site_content_info{digest}`, load time, file count).
+  loads, `static_site_content_info{digest}`, load time, file count; for live
+  files `static_site_live_reloads_total{file,result}` (`ok`, `invalid`,
+  `error`: one per changed file read) and
+  `static_site_live_loaded_timestamp_seconds{file}`).
 - JSON logs on stdout; requests are logged at info only when they end in 4xx or
   5xx (`STATIC_SITE_LOG_LEVEL=debug` for all).
 - `SIGHUP` reloads (a moved tag is re-resolved); a failed reload keeps serving
@@ -502,7 +546,8 @@ site and ops ports (restricted by `ingressFrom` and `metricsFrom` when set) and
 egress to DNS and HTTPS. `cache.private: true` makes every response `private, no-store`
 (see Serving). It does not authenticate: a consuming estate that serves a private
 site must put its sign-in in front of the site, and the server is then reachable
-only through that gateway. `values.schema.json` is strict at the top level, and
+only through that gateway. `live` and `extraContainers` add files a second
+container of the pod keeps current (see Live files). `values.schema.json` is strict at the top level, and
 every refusal has a fixture under `tests/invalid/static-site/`.
 
 ## Release

@@ -43,6 +43,10 @@ site:
   plainHTTP: false
   # Serve /index.html for extensionless paths that match no file.
   spaFallback: false
+  # Content-Type of named files, over the one their extension gives: for a
+  # file with no extension whose type a client insists on.
+  contentTypes: {}
+    # /.well-known/apple-app-site-association: application/json
   # Page served with a 404 (path inside the site); empty for a plain 404.
   notFoundPage: 404.html
   # Refuse an artifact larger than this many bytes / with more files.
@@ -93,6 +97,8 @@ registry:
     tags: {}
     # ARN of the role's permissions boundary.
     permissionsBoundary: ""
+    # static-site-infra's: more statements on the role's policy. Ignored here.
+    extraStatements: []
 
 # Serve-time placeholders: {{ name }} in html, js, css and json files is
 # replaced by the value, for the names provided here and no others. Static
@@ -145,6 +151,34 @@ cache:
   # hashedPattern are then ignored. The server does not authenticate: put
   # access control in front of the site.
   private: false
+
+# Live files: a short list of small files that are NOT in the artifact. They
+# sit in a memory-backed volume that a second container of the pod writes
+# (see extraContainers), and each is served at the site root (/<name>) with
+# Cache-Control: no-store. The server re-reads them every `interval` and
+# checks each before serving it (the size cap; a .json file must parse): a
+# file that fails keeps its last good version, and a name with no good
+# version yet answers 404. Use it for what must change without a release,
+# such as a feature-flag file a sidecar keeps current.
+live:
+  enabled: false
+  # File names, served at the site root. A name listed here is never served
+  # from the artifact.
+  files: []
+    # - flags.json
+  interval: 5s
+  # The largest file accepted, in bytes.
+  maxBytes: 65536
+  # The volume `live`, mounted read-only in the server at /var/run/live. The
+  # writer mounts the same volume by that name.
+  sizeLimit: 1Mi
+
+# More containers in the pod, verbatim (a container needs `name` and
+# `image`). The pod's securityContext applies to them: they run as a
+# non-root user unless they say otherwise. To write live files, mount the
+# volume `live`:
+#   volumeMounts: [{name: live, mountPath: /var/run/live}]
+extraContainers: []
 
 # Response headers added to every response, over the defaults (nosniff,
 # X-Frame-Options DENY, a strict-origin-when-cross-origin referrer policy).

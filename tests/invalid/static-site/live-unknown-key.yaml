@@ -1,0 +1,8 @@
+site:
+  artifact:
+    ref: registry.example.com/static/www
+    digest: sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+live:
+  enabled: true
+  files: [flags.json]
+  dir: /etc

@@ -1,6 +1,7 @@
 {{- include "static-site.validatePlaceholders" . }}
 {{- include "static-site.validateExternalSecret" . }}
 {{- include "static-site.validateRegistry" . }}
+{{- include "static-site.validateLive" . }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -82,6 +83,10 @@ spec:
               value: {{ .Values.site.plainHTTP | quote }}
             - name: STATIC_SITE_SPA_FALLBACK
               value: {{ .Values.site.spaFallback | quote }}
+            {{- if .Values.site.contentTypes }}
+            - name: STATIC_SITE_CONTENT_TYPES
+              value: {{ toJson .Values.site.contentTypes | quote }}
+            {{- end }}
             - name: STATIC_SITE_NOT_FOUND_PAGE
               value: {{ .Values.site.notFoundPage | quote }}
             - name: STATIC_SITE_MAX_BYTES
@@ -121,6 +126,16 @@ spec:
             {{- end }}
             - name: STATIC_SITE_PLACEHOLDERS_STRICT
               value: "true"
+            {{- end }}
+            {{- if .Values.live.enabled }}
+            - name: STATIC_SITE_LIVE_DIR
+              value: /var/run/live
+            - name: STATIC_SITE_LIVE_FILES
+              value: {{ join "," .Values.live.files | quote }}
+            - name: STATIC_SITE_LIVE_INTERVAL
+              value: {{ .Values.live.interval | quote }}
+            - name: STATIC_SITE_LIVE_MAX_BYTES
+              value: {{ .Values.live.maxBytes | int64 | quote }}
             {{- end }}
             - name: STATIC_SITE_LOG_LEVEL
               value: {{ .Values.logLevel | quote }}
@@ -162,6 +177,11 @@ spec:
           volumeMounts:
             - name: content
               mountPath: /var/run/site
+            {{- if .Values.live.enabled }}
+            - name: live
+              mountPath: /var/run/live
+              readOnly: true
+            {{- end }}
             {{- if (include "static-site.inlinePlaceholders" . | fromJson) }}
             - name: placeholders
               mountPath: /etc/static-site
@@ -177,11 +197,20 @@ spec:
               mountPath: /etc/registry-auth
               readOnly: true
             {{- end }}
+        {{- with .Values.extraContainers }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
       volumes:
         - name: content
           emptyDir:
             medium: Memory
             sizeLimit: {{ .Values.site.contentSizeLimit | quote }}
+        {{- if .Values.live.enabled }}
+        - name: live
+          emptyDir:
+            medium: Memory
+            sizeLimit: {{ .Values.live.sizeLimit | quote }}
+        {{- end }}
         {{- if (include "static-site.inlinePlaceholders" . | fromJson) }}
         - name: placeholders
           configMap:

@@ -1,6 +1,7 @@
 package staticsite
 
 import (
+	"errors"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -439,4 +440,47 @@ func TestPlaceholderDirRefusesBadName(t *testing.T) {
 	env["STATIC_SITE_PLACEHOLDERS_KEYS"] = "../escape"
 	_, err := FromEnv(envOf(env))
 	assert.Error(t, err)
+}
+
+func TestConfiguredContentType(t *testing.T) {
+	files := map[string]string{
+		"index.html":                             "<html></html>",
+		".well-known/apple-app-site-association": `{"applinks":{}}`,
+		"LICENSE":                                "text",
+	}
+	h := newTestHandler(t, files, func(c *Config) {
+		c.ContentTypes = map[string]string{"/.well-known/apple-app-site-association": "application/json", "/absent": "text/plain"}
+		require.NoError(t, errors.Join(validateContentTypes(c)...))
+	})
+	w := get(h, "GET", "/.well-known/apple-app-site-association")
+	assert.Equal(t, 200, w.Code)
+	assert.Equal(t, "application/json", w.Header().Get("Content-Type"))
+	assert.Equal(t, `{"applinks":{}}`, w.Body.String())
+	assert.Equal(t, "application/octet-stream", get(h, "GET", "/LICENSE").Header().Get("Content-Type"), "an unlisted file keeps its type")
+	assert.Equal(t, "text/html; charset=utf-8", get(h, "GET", "/").Header().Get("Content-Type"))
+	assert.Equal(t, 404, get(h, "GET", "/absent").Code, "a path that is not in the site is not created")
+}
+
+func TestContentTypesConfig(t *testing.T) {
+	env := func(v string) func(string) string {
+		m := map[string]string{"STATIC_SITE_DIR": "/srv", "STATIC_SITE_CONTENT_TYPES": v}
+		return func(k string) string { return m[k] }
+	}
+	c, err := FromEnv(env(`{"/.well-known/assoc":"application/json","/feed":"application/atom+xml; charset=utf-8"}`))
+	require.NoError(t, err)
+	assert.Equal(t, "application/json", c.ContentTypes["/.well-known/assoc"])
+
+	for name, tc := range map[string]struct{ v, want string }{
+		"not json":      {`{`, "STATIC_SITE_CONTENT_TYPES"},
+		"relative path": {`{"assoc":"application/json"}`, "not a clean absolute file path"},
+		"dot-dot":       {`{"/a/../b":"application/json"}`, "not a clean absolute file path"},
+		"a directory":   {`{"/a/":"application/json"}`, "not a clean absolute file path"},
+		"header break":  {`{"/a":"text/plain\r\nX-Evil: 1"}`, "is not type/subtype"},
+		"no subtype":    {`{"/a":"json"}`, "is not type/subtype"},
+		"a parameter":   {`{"/a":"text/html; charset=utf-7"}`, "is not type/subtype"},
+	} {
+		_, err := FromEnv(env(tc.v))
+		require.Error(t, err, name)
+		assert.Contains(t, err.Error(), tc.want, name)
+	}
 }

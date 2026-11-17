@@ -124,6 +124,9 @@ func buildEntry(disk, key string, cfg *Config) (*entry, error) {
 	}
 	defer func() { _ = f.Close() }()
 	e := &entry{disk: disk, ctype: contentType(key)}
+	if t := cfg.ContentTypes[key]; t != "" {
+		e.ctype = t
+	}
 	kind := kindOf(key)
 	e.html = kind == kindHTML
 	e.hashed = !e.html && cfg.HashedPattern != nil && cfg.HashedPattern.MatchString(path.Base(key))

@@ -22,12 +22,16 @@ type Server struct {
 	draining atomic.Bool
 	prevDir  string
 	regAuth  *registryAuth
+	live     *Live
 }
 
 // NewServer returns a server with no content loaded yet.
 func NewServer(cfg *Config, log *slog.Logger) *Server {
 	m := NewMetrics()
-	return &Server{cfg: cfg, log: log, metrics: m, handler: NewHandler(cfg, m), regAuth: newRegistryAuth(cfg, log)}
+	s := &Server{cfg: cfg, log: log, metrics: m, handler: NewHandler(cfg, m), regAuth: newRegistryAuth(cfg, log)}
+	s.live = NewLive(cfg, log, m)
+	s.handler.SetLive(s.live)
+	return s
 }
 
 // Load fetches (or indexes) the content and swaps it in. On failure the
@@ -70,6 +74,11 @@ func (s *Server) Load(ctx context.Context) (err error) {
 		return err
 	}
 	site.Digest = digest
+	for _, name := range s.live.Names() {
+		if site.files["/"+name] != nil {
+			s.log.Warn("the artifact carries a file with the name of a live file; the live file is served", "file", name)
+		}
+	}
 	s.handler.Set(site)
 	s.metrics.Loaded(site)
 	s.log.Info("content loaded", "digest", digest, "files", len(site.files), "dir", root)
@@ -138,6 +147,13 @@ func (s *Server) Run(ctx context.Context) error {
 	if err := s.Load(ctx); err != nil {
 		_ = ops.Close()
 		return fmt.Errorf("initial load: %w", err)
+	}
+	if s.live != nil {
+		// One pass before the site port opens, so a file that is already
+		// there is served from the first request. Readiness does not wait
+		// for it: a site is ready without its live files.
+		s.live.Refresh()
+		go s.live.Run(ctx)
 	}
 	go func() { errc <- site.ListenAndServe() }()
 
