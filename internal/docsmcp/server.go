@@ -134,12 +134,14 @@ func (s *Server) MCPHandler() http.Handler {
 	return s.metrics.Instrument(allowHosts(s.cfg.AllowedHosts, mux), s.requestLog)
 }
 
+// requestLog logs the method, the status and the time; never the path or any
+// other text the caller chose: the audit line is the sidecar's.
 func (s *Server) requestLog(r *http.Request, code int, d time.Duration) {
 	level := slog.LevelDebug
 	if code >= 400 {
 		level = slog.LevelInfo
 	}
-	s.log.Log(r.Context(), level, "request", "method", r.Method, "path", r.URL.Path, "status", code, "duration_ms", d.Milliseconds())
+	s.log.Log(r.Context(), level, "request", "method", r.Method, "status", code, "duration_ms", d.Milliseconds())
 }
 
 // allowHosts answers only requests whose Host header is one of hosts (port
