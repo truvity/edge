@@ -2,9 +2,11 @@
 # which runs goreleaser and then pushes every chart under charts/ to
 # ghcr.io/truvity/charts at the tag's version.
 #
-# One build: cmd/static-site, the generic static-site server, shipped as a
-# distroless image (ko, below) at the same version as the charts and the Go
-# module. The charts and the Go library need no build step.
+# Two builds, each shipped as a distroless image (ko, below) at the same
+# version as the charts and the Go module: cmd/static-site, the generic
+# static-site server, and cmd/docs-mcp, which builds the MCP pack of a
+# documentation site and serves it over MCP. The charts and the Go library
+# need no build step.
 version: 2
 
 builds:
@@ -17,16 +19,43 @@ builds:
     flags: [-trimpath]
     ldflags:
       - -s -w -X main.version={{.Version}}
+  - id: docs-mcp
+    main: ./cmd/docs-mcp
+    binary: docs-mcp
+    env: [CGO_ENABLED=0]
+    mod_timestamp: "{{ .CommitTimestamp }}"
+    goos: [linux]
+    goarch: [amd64, arm64]
+    flags: [-trimpath]
+    ldflags:
+      - -s -w -X main.version={{.Version}}
 
-# The archive is a convenience for running the server outside a cluster; the
-# image is the product.
+# The static-site archive is a convenience for running the server outside a
+# cluster; the image is the product.
+#
+# docs-mcp is also a release binary: `docs-mcp pack` runs in a CI that cannot
+# run a container, which downloads docs-mcp_<version>_linux_<arch>.tar.gz from
+# the GitHub Release and checks it against the checksums file.
 archives:
   - id: static-site
     ids: [static-site]
     formats: [tar.gz]
+  - id: docs-mcp
+    ids: [docs-mcp]
+    formats: [tar.gz]
+    name_template: "docs-mcp_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files: [LICENSE]
+
+# One SHA-256 file for every archive of the release, which is the goreleaser
+# default name and algorithm, written down.
+checksum:
+  name_template: "{{ .ProjectName }}_{{ .Version }}_checksums.txt"
+  algorithm: sha256
 
 # The caller's ko-docker-repo (ghcr.io/truvity/edge, release.yaml) plus
-# base_import_paths puts the image at ghcr.io/truvity/edge/static-site.
+# base_import_paths puts the images at ghcr.io/truvity/edge/static-site and
+# ghcr.io/truvity/edge/docs-mcp. docs-mcp has no archive: its image is how CI
+# runs `docs-mcp pack` and how the cluster runs `docs-mcp serve`.
 kos:
   - id: static-site
     build: static-site
@@ -41,6 +70,22 @@ kos:
     sbom: none
     labels:
       org.opencontainers.image.title: static-site
+      org.opencontainers.image.version: "{{ .Version }}"
+      org.opencontainers.image.source: https://github.com/truvity/edge
+
+  - id: docs-mcp
+    build: docs-mcp
+    tags:
+      - "{{ .Version }}"
+      - "{{ if not .IsSnapshot }}latest{{ end }}"
+    platforms: [linux/amd64, linux/arm64]
+    bare: true
+    preserve_import_paths: false
+    base_import_paths: true
+    base_image: gcr.io/distroless/static:nonroot
+    sbom: none
+    labels:
+      org.opencontainers.image.title: docs-mcp
       org.opencontainers.image.version: "{{ .Version }}"
       org.opencontainers.image.source: https://github.com/truvity/edge
 
@@ -69,4 +114,6 @@ release:
     | static-site chart | `oci://ghcr.io/truvity/charts/static-site:{{ .Version }}` |
     | static-site-infra chart | `oci://ghcr.io/truvity/charts/static-site-infra:{{ .Version }}` |
     | static-site image | `ghcr.io/truvity/edge/static-site:{{ .Version }}` |
+    | docs-mcp chart | `oci://ghcr.io/truvity/charts/docs-mcp:{{ .Version }}` |
+    | docs-mcp image | `ghcr.io/truvity/edge/docs-mcp:{{ .Version }}` |
     | Go | `go get github.com/truvity/edge/v4@{{ .Tag }}` |

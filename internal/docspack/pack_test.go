@@ -3,6 +3,7 @@ package docspack
 import (
 	"os"
 	"path/filepath"
+	"sort"
 	"testing"
 	"time"
 
@@ -63,23 +64,59 @@ func TestBuildAndLoad(t *testing.T) {
 	assert.Equal(t, "/guides/install/", m.Docs[1].URL)
 }
 
-func TestBuildIsDeterministic(t *testing.T) {
-	in := writeTree(t, corpus)
+// treeBytes reads every file under dir into a map by relative path.
+func treeBytes(t *testing.T, dir string) map[string][]byte {
+	t.Helper()
+	out := map[string][]byte{}
+	require.NoError(t, filepath.WalkDir(dir, func(p string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		data, err := os.ReadFile(p)
+		require.NoError(t, err)
+		rel, _ := filepath.Rel(dir, p)
+		out[filepath.ToSlash(rel)] = data
+		return nil
+	}))
+	return out
+}
+
+func TestBuildIsByteReproducible(t *testing.T) {
+	// Two copies of one input, in different places, written in a different
+	// order and with different file times and modes, packed into different
+	// places: the packs are the same bytes, and name no host path.
+	inA, inB := writeTree(t, corpus), t.TempDir()
+	names := make([]string, 0, len(corpus))
+	for name := range corpus {
+		names = append(names, name)
+	}
+	sort.Sort(sort.Reverse(sort.StringSlice(names)))
+	for i, name := range names {
+		p := filepath.Join(inB, filepath.FromSlash(name))
+		require.NoError(t, os.MkdirAll(filepath.Dir(p), 0o755))
+		require.NoError(t, os.WriteFile(p, []byte(corpus[name]), 0o600))
+		require.NoError(t, os.Chtimes(p, time.Unix(int64(1000+i), 0), time.Unix(int64(5000-i), 0)))
+	}
 	a, b := filepath.Join(t.TempDir(), "a"), filepath.Join(t.TempDir(), "b")
-	_, err := Build(BuildOptions{In: in, Out: a})
+	epoch := time.Unix(1700000000, 0)
+	_, err := Build(BuildOptions{In: inA, Out: a, CreatedAt: epoch, Title: "T"})
 	require.NoError(t, err)
-	// Touch the input: file times must not reach the pack.
-	require.NoError(t, os.Chtimes(filepath.Join(in, "index.md"), time.Unix(1, 0), time.Unix(1, 0)))
-	_, err = Build(BuildOptions{In: in, Out: b})
+	_, err = Build(BuildOptions{In: inB, Out: b, CreatedAt: epoch, Title: "T"})
 	require.NoError(t, err)
 
-	for _, name := range []string{ManifestName, IndexName, "docs/index.md", "llms.txt"} {
-		x, err := os.ReadFile(filepath.Join(a, name))
-		require.NoError(t, err)
-		y, err := os.ReadFile(filepath.Join(b, name))
-		require.NoError(t, err)
-		assert.Equal(t, x, y, name)
+	ta, tb := treeBytes(t, a), treeBytes(t, b)
+	require.Equal(t, ta, tb)
+	for name, data := range ta {
+		assert.NotContains(t, string(data), inA, name)
+		assert.NotContains(t, string(data), inB, name)
+		assert.NotContains(t, string(data), os.TempDir(), name)
 	}
+
+	// Without a time, the same again, and the manifest records none.
+	c := filepath.Join(t.TempDir(), "c")
+	_, err = Build(BuildOptions{In: inA, Out: c})
+	require.NoError(t, err)
+	assert.NotContains(t, string(treeBytes(t, c)[ManifestName]), "createdAt")
 }
 
 func TestBuildRecordsTimeOnlyWhenGiven(t *testing.T) {
