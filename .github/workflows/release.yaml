@@ -1,6 +1,6 @@
 # Tag-triggered release — the shared implementation (truvity/ci-workflows).
-# goreleaser makes the GitHub Release and builds the static-site image
-# (see .goreleaser.yaml);
+# goreleaser makes the GitHub Release and builds the static-site and docs-mcp
+# images (see .goreleaser.yaml);
 # every chart listed below is packaged at the tag's version and pushed to
 # oci://ghcr.io/truvity/charts/<chart>.
 #
@@ -30,9 +30,10 @@ jobs:
       packages: write
     uses: truvity/ci-workflows/.github/workflows/release-public.yaml@81bc1cd3003294d9bdc0f141956a432b8b33d423 # v5.13.0
     with:
-      charts: '["cloudflared", "gateway-fleet", "gateway-groups", "gateway-policies", "gateway-projects", "gateway-routes", "static-site", "static-site-infra"]'
-      # The static-site server image: goreleaser's ko section pushes it to
-      # <ko-docker-repo>/static-site at the same tag as the charts.
+      charts: '["cloudflared", "gateway-fleet", "gateway-groups", "gateway-policies", "gateway-projects", "gateway-routes", "docs-mcp", "static-site", "static-site-infra"]'
+      # The static-site and docs-mcp images: goreleaser's ko sections push
+      # them to <ko-docker-repo>/static-site and <ko-docker-repo>/docs-mcp at
+      # the same tag as the charts.
       ko-docker-repo: ghcr.io/truvity/edge
       # 26.04 hosted runners kill heavy Go jobs, so drop this pin once 26.04 is stable.
       runner: ubuntu-24.04
