@@ -1,0 +1,196 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "docs-mcp chart values",
+  "description": "Strict at the top level: unknown keys are rejected so a typo fails the render. Kubernetes passthrough fields stay open.",
+  "type": "object",
+  "additionalProperties": false,
+  "definitions": {
+    "image": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "repository": { "type": "string", "minLength": 1 },
+        "tag": { "type": "string" },
+        "digest": { "type": "string", "pattern": "^(sha256:[0-9a-f]{64})?$" },
+        "pullPolicy": { "enum": ["Always", "IfNotPresent", "Never"] }
+      }
+    },
+    "httpsURL": {
+      "type": "string",
+      "pattern": "^(https://[^\\s#?]+)?$",
+      "description": "https, no fragment, no query. Empty is refused at render time."
+    },
+    "duration": { "type": "string", "pattern": "^[0-9]+(ms|s|m|h)$" }
+  },
+  "properties": {
+    "global": { "type": "object" },
+    "service-lib": { "type": "object", "description": "Helm adds a key for every dependency; the library takes no values" },
+    "nameOverride": { "type": "string" },
+    "fullnameOverride": { "type": "string" },
+    "replicaCount": { "type": "integer", "minimum": 0 },
+    "image": { "$ref": "#/definitions/image" },
+    "images": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "identity-check": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "the identity check hook's image (truvity/k8s cmd/identity-check)",
+          "required": ["repository", "digest"],
+          "properties": {
+            "registry": { "type": "string" },
+            "repository": { "type": "string", "minLength": 1 },
+            "tag": { "type": "string" },
+            "digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" }
+          }
+        }
+      }
+    },
+    "imagePullSecrets": { "type": "array", "items": { "type": "object" } },
+    "issuerURL": { "$ref": "#/definitions/httpsURL" },
+    "resourceURL": { "$ref": "#/definitions/httpsURL" },
+    "scope": { "type": "string", "pattern": "^[^\\s\"\\\\]+$" },
+    "proxy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "image": { "$ref": "#/definitions/image" },
+        "runAsUser": { "type": "integer", "minimum": 1 },
+        "resources": { "type": "object" }
+      }
+    },
+    "pack": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "artifact": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "ref": { "type": "string", "pattern": "^[^@\\s]*$", "description": "registry/repository[:tag], no digest: that is artifact.digest" },
+            "digest": { "type": "string", "pattern": "^(sha256:[0-9a-f]{64})?$" }
+          }
+        },
+        "pullSecretName": { "type": "string" },
+        "plainHTTP": { "type": "boolean" },
+        "maxBytes": { "type": "integer", "minimum": 1 },
+        "maxResponseBytes": { "type": "integer", "minimum": 1024, "maximum": 67108864 },
+        "contentSizeLimit": { "type": "string", "minLength": 1 }
+      }
+    },
+    "registry": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "auth": { "enum": ["dockerconfig", "ecr", "none"], "description": "dockerconfig: the Docker config of pack.pullSecretName (default); ecr: the server authenticates to Amazon ECR through the AWS SDK default credential chain; none: anonymous" },
+        "ack": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "the ServiceAccount's AWS identity on EKS is static-site-infra's (the same keys); this chart reads enabled and accountId: with registry.auth=ecr it renders no ServiceAccount and the identity check hook, which passes accountId (when set) as the account the pod must run in",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "clusterName": { "type": "string", "pattern": "^([a-zA-Z0-9][a-zA-Z0-9_-]{0,99})?$" },
+            "repositoryArns": { "type": "array", "uniqueItems": true, "items": { "type": "string", "pattern": "^arn:aws[a-z-]*:ecr:[a-z0-9-]+:[0-9]{12}:repository/[a-z0-9._/-]+$" } },
+            "rolePrefix": { "type": "string", "pattern": "^([a-zA-Z0-9+=,.@_-]{1,64})?$" },
+            "accountId": { "type": "string", "pattern": "^([0-9]{12})?$" },
+            "region": { "type": "string", "pattern": "^([a-z]{2}(-[a-z]+)+-[0-9]+)?$" },
+            "tags": { "type": "object", "additionalProperties": { "type": "string" } },
+            "permissionsBoundary": { "type": "string", "pattern": "^(arn:aws[a-z-]*:iam::[0-9]{12}:policy/.+)?$" },
+            "extraStatements": { "type": "array", "description": "static-site-infra's; ignored here", "items": { "type": "object" } }
+          }
+        }
+      }
+    },
+    "logLevel": { "enum": ["debug", "info", "warn", "error"] },
+    "service": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type": { "enum": ["ClusterIP", "NodePort", "LoadBalancer"] },
+        "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+        "annotations": { "type": "object", "additionalProperties": { "type": "string" } }
+      }
+    },
+    "resources": { "type": "object" },
+    "terminationGracePeriodSeconds": { "type": "integer", "minimum": 0 },
+    "serviceAccount": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "create": { "type": "boolean" },
+        "name": { "type": "string" },
+        "annotations": { "type": "object", "additionalProperties": { "type": "string" } }
+      }
+    },
+    "podAnnotations": { "type": "object", "additionalProperties": { "type": "string" } },
+    "podLabels": { "type": "object", "additionalProperties": { "type": "string" } },
+    "priorityClassName": { "type": "string" },
+    "nodeSelector": { "type": "object", "additionalProperties": { "type": "string" } },
+    "tolerations": { "type": "array", "items": { "type": "object" } },
+    "affinity": { "type": "object" },
+    "topologySpreadConstraints": { "type": "array", "items": { "type": "object" } },
+    "podDisruptionBudget": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "minAvailable": { "type": ["integer", "string"] }
+      }
+    },
+    "podMonitor": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "interval": { "$ref": "#/definitions/duration" },
+        "labels": { "type": "object", "additionalProperties": { "type": "string" } }
+      }
+    },
+    "networkPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "ingressFrom": { "type": "array", "items": { "type": "object" } },
+        "metricsFrom": { "type": "array", "items": { "type": "object" } },
+        "egress": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "https": { "type": "array", "items": { "type": "object" } },
+            "dns": { "type": "array", "items": { "type": "object" } }
+          }
+        },
+        "extraEgress": { "type": "array", "items": { "type": "object" } }
+      }
+    },
+    "httpRoute": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "name": { "type": "string", "pattern": "^([a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?)?$" },
+        "parentRefs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name"],
+            "properties": {
+              "group": { "type": "string" },
+              "kind": { "type": "string" },
+              "name": { "type": "string", "minLength": 1 },
+              "namespace": { "type": "string" },
+              "sectionName": { "type": "string" },
+              "port": { "type": "integer" }
+            }
+          }
+        },
+        "hostnames": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "annotations": { "type": "object", "additionalProperties": { "type": "string" } },
+        "labels": { "type": "object", "additionalProperties": { "type": "string" } }
+      }
+    }
+  }
+}

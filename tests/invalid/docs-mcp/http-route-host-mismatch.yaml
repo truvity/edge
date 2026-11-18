@@ -1,0 +1,5 @@
+httpRoute:
+  enabled: true
+  hostnames: [other.example.com]
+  parentRefs:
+    - name: mcp

@@ -1,0 +1,19 @@
+# The values every render of docs-mcp needs, so that lint, the unknown-key
+# probe and the negative fixtures of `just lint` start from a render that
+# works: a fixture then names only what it breaks. The sidecar's tag and
+# digest are examples, not a release.
+issuerURL: https://issuer.example.com
+resourceURL: https://docs.example.com/mcp
+proxy:
+  image:
+    tag: v1.0.0
+    digest: sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+pack:
+  artifact:
+    ref: registry.example.com/docs/pack
+    digest: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+networkPolicy:
+  ingressFrom:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: gateway

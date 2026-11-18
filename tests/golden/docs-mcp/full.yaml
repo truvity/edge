@@ -1,0 +1,396 @@
+---
+# Source: docs-mcp/templates/networkpolicy.yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: docs-mcp
+  namespace: default
+  labels:
+    app.kubernetes.io/name: docs-mcp
+    app.kubernetes.io/instance: docs-mcp
+    app.kubernetes.io/version: "0.0.0"
+    app.kubernetes.io/managed-by: Helm
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: docs-mcp
+      app.kubernetes.io/instance: docs-mcp
+  policyTypes: [Ingress, Egress]
+  ingress:
+    # The gateway, on the proxy's one MCP port.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: gateway
+      ports:
+        - port: 8080
+          protocol: TCP
+    # Whatever scrapes the metrics, on the ops port only.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+      ports:
+        - port: 9090
+          protocol: TCP
+  egress:
+    # DNS. With no `networkPolicy.egress.dns` peers this is port 53 to ANY
+    # destination: the cluster resolver is not a kube-system pod on every
+    # cluster, and a rule naming one namespace blocks DNS where it is not.
+    - ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+      to:
+        - ipBlock:
+            cidr: 10.96.0.10/32
+    # HTTPS: the issuer (signing keys) and the registry of the pack.
+    - ports:
+        - port: 443
+          protocol: TCP
+        - port: 8443
+          protocol: TCP
+        - port: 5000
+          protocol: TCP
+      to:
+        - ipBlock:
+            cidr: 198.51.100.0/24
+    - ports:
+      - port: 8443
+        protocol: TCP
+      to:
+      - ipBlock:
+          cidr: 192.0.2.0/24
+
+---
+# Source: docs-mcp/templates/pdb.yaml
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: docs-mcp
+  namespace: default
+  labels:
+    app.kubernetes.io/name: docs-mcp
+    app.kubernetes.io/instance: docs-mcp
+    app.kubernetes.io/version: "0.0.0"
+    app.kubernetes.io/managed-by: Helm
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: docs-mcp
+      app.kubernetes.io/instance: docs-mcp
+
+---
+# Source: docs-mcp/templates/serviceaccount.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: docs-mcp
+  namespace: default
+  labels:
+    app.kubernetes.io/name: docs-mcp
+    app.kubernetes.io/instance: docs-mcp
+    app.kubernetes.io/version: "0.0.0"
+    app.kubernetes.io/managed-by: Helm
+automountServiceAccountToken: false
+
+---
+# Source: docs-mcp/templates/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: docs-mcp
+  namespace: default
+  labels:
+    app.kubernetes.io/name: docs-mcp
+    app.kubernetes.io/instance: docs-mcp
+    app.kubernetes.io/version: "0.0.0"
+    app.kubernetes.io/managed-by: Helm
+  annotations:
+    example.com/team: docs
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: docs-mcp
+    app.kubernetes.io/instance: docs-mcp
+  # The proxy's port and no other: nothing else of the pod is reachable
+  # through the Service.
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+      protocol: TCP
+
+---
+# Source: docs-mcp/templates/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: docs-mcp
+  namespace: default
+  labels:
+    app.kubernetes.io/name: docs-mcp
+    app.kubernetes.io/instance: docs-mcp
+    app.kubernetes.io/version: "0.0.0"
+    app.kubernetes.io/managed-by: Helm
+spec:
+  replicas: 3
+  # A rollout never takes a pod away before its replacement is ready.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: docs-mcp
+      app.kubernetes.io/instance: docs-mcp
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: docs-mcp
+        app.kubernetes.io/instance: docs-mcp
+      annotations:
+        example.com/team: docs
+    spec:
+      serviceAccountName: docs-mcp
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 40
+      imagePullSecrets:
+        - name: server-image-pull
+      priorityClassName: high
+      nodeSelector:
+        kubernetes.io/arch: arm64
+      # Replicas spread over zones and nodes, so one node or zone going away
+      # does not take the server with it. Soft (ScheduleAnyway): a small
+      # estate still schedules.
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: docs-mcp
+              app.kubernetes.io/instance: docs-mcp
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: docs-mcp
+              app.kubernetes.io/instance: docs-mcp
+      # Pod Security Standard "restricted": non-root, a seccomp profile, no
+      # privilege escalation and no capabilities on every container.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        # The server. Loopback only for MCP: it declares no container port for
+        # it, and holds no authentication code. Its ops port serves the
+        # kubelet's probes and /metrics, nothing of the MCP surface.
+        - name: docs-mcp
+          image: "ghcr.io/truvity/edge/docs-mcp:v1.2.3@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+          imagePullPolicy: IfNotPresent
+          args: ["serve"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          env:
+            - name: DOCS_MCP_ADDR
+              value: "127.0.0.1:8081"
+            - name: DOCS_MCP_OPS_ADDR
+              value: ":9090"
+            - name: DOCS_MCP_ALLOWED_HOSTS
+              value: "docs.example.com,127.0.0.1,localhost"
+            - name: DOCS_MCP_ARTIFACT_REF
+              value: "registry.example.com:5000/docs/pack"
+            - name: DOCS_MCP_ARTIFACT_DIGEST
+              value: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            - name: DOCS_MCP_CONTENT_DIR
+              value: /var/run/pack
+            - name: DOCS_MCP_PLAIN_HTTP
+              value: "false"
+            - name: DOCS_MCP_MAX_BYTES
+              value: "33554432"
+            - name: DOCS_MCP_MAX_RESPONSE_BYTES
+              value: "65536"
+            - name: DOCS_MCP_LOG_LEVEL
+              value: "debug"
+            - name: DOCKER_CONFIG
+              value: /etc/registry-auth
+          ports:
+            - name: ops
+              containerPort: 9090
+              protocol: TCP
+          # The pack is pulled before the MCP port opens; startup allows for
+          # a slow registry without loosening liveness.
+          startupProbe:
+            httpGet:
+              path: /readyz
+              port: ops
+            periodSeconds: 2
+            failureThreshold: 90
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: ops
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: ops
+            periodSeconds: 5
+          resources:
+            limits:
+              memory: 512Mi
+            requests:
+              cpu: 50m
+              memory: 128Mi
+          volumeMounts:
+            - name: content
+              mountPath: /var/run/pack
+            - name: registry-auth
+              mountPath: /etc/registry-auth
+              readOnly: true
+        # The resource-proxy: the pod's only MCP port. It checks the bearer
+        # token, writes the audit line and forwards to docs-mcp on loopback.
+        # No OUTBOUND_*: the server has no backend, so nothing is exchanged.
+        - name: proxy
+          image: "ghcr.io/truvity/sluis/resource-proxy:v1.0.0@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            runAsUser: 65532
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          env:
+            - name: LISTEN
+              value: ":8080"
+            - name: UPSTREAM
+              value: "http://127.0.0.1:8081/mcp"
+            - name: ISSUER_URL
+              value: "https://issuer.example.com:8443"
+            - name: RESOURCE_URL
+              value: "https://docs.example.com/mcp"
+            - name: SCOPE
+              value: "openid"
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+          resources:
+            limits:
+              memory: 128Mi
+            requests:
+              cpu: 20m
+              memory: 48Mi
+      volumes:
+        - name: content
+          emptyDir:
+            medium: Memory
+            sizeLimit: "128Mi"
+        - name: registry-auth
+          secret:
+            secretName: pack-pull
+            items:
+              - key: .dockerconfigjson
+                path: config.json
+
+---
+# Source: docs-mcp/templates/httproute.yaml
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: docs
+  namespace: default
+  labels:
+    app.kubernetes.io/name: docs-mcp
+    app.kubernetes.io/instance: docs-mcp
+    app.kubernetes.io/version: "0.0.0"
+    app.kubernetes.io/managed-by: Helm
+  annotations:
+    example.com/note: route
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: ListenerSet
+      name: mcp
+      namespace: gateway
+  hostnames:
+    - docs.example.com
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /mcp
+      timeouts:
+        request: 0s
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: docs-mcp
+          port: 80
+          weight: 1
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /.well-known/oauth-protected-resource/mcp
+      timeouts:
+        request: 0s
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: docs-mcp
+          port: 80
+          weight: 1
+    - matches:
+        - path:
+            type: Exact
+            value: /.well-known/oauth-protected-resource
+      timeouts:
+        request: 0s
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: docs-mcp
+          port: 80
+          weight: 1
+
+---
+# Source: docs-mcp/templates/podmonitor.yaml
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: docs-mcp
+  namespace: default
+  labels:
+    app.kubernetes.io/name: docs-mcp
+    app.kubernetes.io/instance: docs-mcp
+    app.kubernetes.io/version: "0.0.0"
+    app.kubernetes.io/managed-by: Helm
+    release: metrics
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: docs-mcp
+      app.kubernetes.io/instance: docs-mcp
+  podMetricsEndpoints:
+    - port: ops
+      path: /metrics
+      interval: 30s

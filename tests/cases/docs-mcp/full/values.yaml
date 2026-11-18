@@ -1,0 +1,85 @@
+# Every optional knob on, with a dockerconfig registry.
+fullnameOverride: docs-mcp
+replicaCount: 3
+image:
+  tag: v1.2.3
+  digest: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+imagePullSecrets:
+  - name: server-image-pull
+issuerURL: https://issuer.example.com:8443
+resourceURL: https://docs.example.com/mcp
+scope: openid
+proxy:
+  image:
+    tag: v1.0.0
+    digest: sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+  resources:
+    requests:
+      cpu: 20m
+      memory: 48Mi
+    limits:
+      memory: 128Mi
+pack:
+  artifact:
+    ref: registry.example.com:5000/docs/pack
+    digest: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  pullSecretName: pack-pull
+  maxBytes: 33554432
+  maxResponseBytes: 65536
+  contentSizeLimit: 128Mi
+logLevel: debug
+service:
+  port: 80
+  annotations:
+    example.com/team: docs
+resources:
+  requests:
+    cpu: 50m
+    memory: 128Mi
+  limits:
+    memory: 512Mi
+podAnnotations:
+  example.com/team: docs
+nodeSelector:
+  kubernetes.io/arch: arm64
+priorityClassName: high
+podDisruptionBudget:
+  minAvailable: 2
+podMonitor:
+  enabled: true
+  labels:
+    release: metrics
+networkPolicy:
+  ingressFrom:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: gateway
+  metricsFrom:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: monitoring
+  egress:
+    https:
+      - ipBlock:
+          cidr: 198.51.100.0/24
+    dns:
+      - ipBlock:
+          cidr: 10.96.0.10/32
+  extraEgress:
+    - to:
+        - ipBlock:
+            cidr: 192.0.2.0/24
+      ports:
+        - port: 8443
+          protocol: TCP
+httpRoute:
+  enabled: true
+  name: docs
+  hostnames: [docs.example.com]
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: ListenerSet
+      name: mcp
+      namespace: gateway
+  annotations:
+    example.com/note: route

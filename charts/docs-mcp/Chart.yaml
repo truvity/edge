@@ -1,0 +1,32 @@
+apiVersion: v2
+name: docs-mcp
+description: >-
+  Serves a documentation pack (built by `docs-mcp pack`) to agents over the
+  Model Context Protocol, read-only: one OCI artifact pulled by digest, four
+  tools, behind a resource-proxy sidecar that checks the caller's access
+  token. The server holds no authentication code.
+type: application
+# Placeholder: the git tag is the sole version authority. The release
+# workflow stamps both fields from the tag (truvity/ci-workflows
+# release-public.yaml). appVersion is the default image tag, so the chart and
+# the server image it runs are always the same release.
+version: 0.0.0
+appVersion: 0.0.0
+# The pod's cloud identity check comes from the platform's library chart
+# (rule 11 of the platform contract). It is rendered only for registry.auth=ecr
+# with registry.ack.enabled. `helm dependency build` resolves it; the release
+# packages with it.
+dependencies:
+  - name: service-lib
+    version: 1.54.0
+    repository: oci://ghcr.io/truvity/charts
+home: https://github.com/truvity/edge
+sources:
+  - https://github.com/truvity/edge
+keywords:
+  - docs-mcp
+  - mcp
+  - oci
+maintainers:
+  - name: Truvity
+    url: https://github.com/truvity

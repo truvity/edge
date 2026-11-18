@@ -1,0 +1,3 @@
+pack:
+  artifact:
+    ref: registry.example.com/docs/pack@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
