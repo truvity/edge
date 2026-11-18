@@ -134,7 +134,7 @@ Configured by environment, like `static-site`:
 | `DOCS_MCP_ALLOWED_HOSTS` | any | comma list of `Host` headers the MCP listener answers |
 | `DOCS_MCP_REGISTRY_AUTH`, `DOCKER_CONFIG`, `DOCS_MCP_PLAIN_HTTP`, `DOCS_MCP_PULL_TIMEOUT` | | as for [static-site](static-site.md#registry-authentication): the same puller |
 | `DOCS_MCP_MAX_BYTES` | 64 MiB | cap on the pack |
-| `DOCS_MCP_MAX_RESPONSE_BYTES` | 128 KiB | cap on the text of one tool result (at least 1024) |
+| `DOCS_MCP_MAX_RESPONSE_BYTES` | 32 KiB | cap on the text of one tool result (at least 1024) |
 | `DOCS_MCP_MAX_CONCURRENT_CALLS` | 16 | tool calls running at once; the others wait their turn. With the response cap it bounds the memory a burst of calls can hold |
 | `DOCS_MCP_LOG_LEVEL`, `DOCS_MCP_SHUTDOWN_DELAY` | `info`, `5s` | |
 
