@@ -1,0 +1,217 @@
+# docs-mcp: one documentation pack, served to agents over MCP, read-only.
+#
+# The pod has two containers:
+#
+#   docs-mcp   pulls the pack (an OCI artifact) by digest, then serves MCP on
+#              127.0.0.1:8081. It declares no container port for MCP and holds
+#              no authentication code. Its ops port (9090: /healthz, /readyz,
+#              /metrics) serves nothing of the MCP surface.
+#   proxy      the sluis resource-proxy: the pod's only MCP port (8080). It
+#              validates the caller's access token (signature against the
+#              issuer's keys, `iss`, and `aud` equal to resourceURL), serves
+#              the RFC 9728 protected-resource metadata, writes one audit line
+#              per request, strips the caller's Authorization header and
+#              forwards to docs-mcp on loopback. docs-mcp has no backend, so
+#              there is no token exchange and no outbound side.
+#
+# Who may call is the issuer's policy for resourceURL, not anything here.
+# Every refusal is in templates/_helpers.tpl; every one has a fixture under
+# tests/invalid/docs-mcp/.
+
+nameOverride: ""
+fullnameOverride: ""
+
+replicaCount: 2
+
+# The docs-mcp image. The tag defaults to the chart's appVersion, which the
+# release stamps with the release version: chart and image never disagree.
+image:
+  repository: ghcr.io/truvity/edge/docs-mcp
+  tag: ""
+  # Optional pin; renders repository:tag@digest.
+  digest: ""
+  pullPolicy: IfNotPresent
+# Other images. identity-check is the pre-install/pre-upgrade hook that proves
+# a pod admitted now has its cloud identity (truvity/k8s cmd/identity-check),
+# rendered when registry.auth=ecr and registry.ack.enabled.
+images:
+  identity-check:
+    registry: ghcr.io
+    repository: truvity/k8s/identity-check
+    tag: 0.34.0
+    digest: sha256:9fc40a066f5455eb807f0826f7083b0ead46924956af3c8ed5e2c381233d1a38
+
+# Secrets for pulling the docs-mcp and proxy IMAGES (not the pack artifact).
+imagePullSecrets: []
+
+# -- The access-token issuer the proxy trusts: its `iss`, and where it finds
+# the signing keys. https, no fragment. REQUIRED.
+issuerURL: ""
+# -- The server's RFC 8707 resource identifier: the exact URL a client
+# connects to, and the `aud` the proxy requires of every token. https, no
+# fragment. Its path is where the gateway routes the server; the proxy
+# forwards the path to docs-mcp's /mcp. REQUIRED.
+resourceURL: ""
+# -- The scope the 401 challenge advertises. Advertised, never checked.
+scope: openid
+
+# -- The resource-proxy sidecar (truvity/sluis, cmd/resource-proxy). Built by
+# another repository's release, so there is NO default version: pin the
+# release you have verified by tag AND digest. Both are REQUIRED.
+proxy:
+  image:
+    repository: ghcr.io/truvity/sluis/resource-proxy
+    tag: ""
+    digest: ""
+    pullPolicy: IfNotPresent
+  # The numeric uid the image runs as. `runAsNonRoot` cannot verify a named
+  # user, so the uid is stated.
+  runAsUser: 65532
+  resources:
+    requests:
+      cpu: 10m
+      memory: 32Mi
+    limits:
+      memory: 96Mi
+
+pack:
+  artifact:
+    # registry/repository[:tag] of the pack artifact, no digest. The default
+    # is a placeholder that serves nothing: set it.
+    ref: registry.example.com/docs/pack
+    # sha256:<64 hex>. REQUIRED: the pack is pulled by digest, and an
+    # independent value lets a promotion tool write it alone.
+    digest: ""
+  # registry.auth=dockerconfig only: name of a kubernetes.io/dockerconfigjson
+  # Secret holding the registry credentials for the artifact. Empty for an
+  # anonymous registry.
+  pullSecretName: ""
+  # Talk plain HTTP to the registry (an in-cluster dev registry only).
+  plainHTTP: false
+  # Refuse a pack larger than this many bytes.
+  maxBytes: 67108864
+  # A tool result is cut to this many bytes; the caller pages with `offset`.
+  maxResponseBytes: 131072
+  # Size of the memory-backed volume the pack is unpacked into. The unpacked
+  # copy is removed once the pack is in memory.
+  contentSizeLimit: 256Mi
+
+# How the server authenticates to the registry of the pack.
+#  dockerconfig  the Docker config file of pack.pullSecretName; none when that
+#                is empty. The default.
+#  ecr           the server calls ecr:GetAuthorizationToken itself with the AWS
+#                SDK default credential chain: EKS Pod Identity, or IRSA
+#                through serviceAccount.annotations["eks.amazonaws.com/role-arn"].
+#                No pull-secret volume; the ServiceAccount token is mounted.
+#  none          anonymous.
+registry:
+  auth: dockerconfig
+  # The ServiceAccount's AWS identity on EKS (needs registry.auth=ecr) is the
+  # static-site-infra chart's, unchanged: the pack is pulled with the same ECR
+  # permissions as a static site. Install static-site-infra with installName
+  # (and serviceAccount.name) set to this release's name, and the same
+  # registry.ack keys; this chart reads `enabled` and `accountId` alone and
+  # renders the identity check hook, which fails until a pod admitted now has
+  # the identity. See docs/docs-mcp.md.
+  ack:
+    enabled: false
+    # Optional, also read here: the AWS account the identity check hook expects
+    # the pod to run in (`-expect-account`; 12 digits, quoted).
+    accountId: ""
+    # Read by static-site-infra, ignored here:
+    clusterName: ""
+    repositoryArns: []
+    rolePrefix: ""
+    region: ""
+    tags: {}
+    permissionsBoundary: ""
+    extraStatements: []
+
+logLevel: info
+
+service:
+  type: ClusterIP
+  # The Service targets the proxy's port only: the one port of the pod that
+  # accepts MCP.
+  port: 8080
+  annotations: {}
+
+# docs-mcp's own limits. The pack is held in memory once loaded.
+resources:
+  requests:
+    cpu: 25m
+    memory: 64Mi
+  limits:
+    memory: 256Mi
+
+terminationGracePeriodSeconds: 40
+
+# With registry.auth=ecr this is the identity the cluster binds AWS
+# credentials to. Pod Identity needs a stable name and no annotation; IRSA
+# needs annotations: {eks.amazonaws.com/role-arn: <role>}.
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+podAnnotations: {}
+podLabels: {}
+priorityClassName: ""
+nodeSelector: {}
+tolerations: []
+affinity: {}
+# Empty: with more than one replica the pods spread softly (ScheduleAnyway)
+# over zones and nodes.
+topologySpreadConstraints: []
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+# A PodMonitor for the ops port's /metrics (the Service carries no ops port).
+podMonitor:
+  enabled: false
+  interval: 30s
+  labels: {}
+
+# The pod admits ingress on the proxy's port from `ingressFrom` (the gateway
+# that fronts the server; REQUIRED while enabled, an empty list would admit
+# nobody) and on the ops port from `metricsFrom` (nothing, by default; the
+# kubelet's probes are not subject to it). Egress is DNS and HTTPS: the
+# issuer's signing keys and the registry of the pack (and, with
+# registry.auth=ecr, the ECR API). `extraEgress` adds rules, verbatim: with
+# Pod Identity, the agent at 169.254.170.23/32, tcp 80.
+networkPolicy:
+  enabled: true
+  ingressFrom: []
+  metricsFrom: []
+  egress:
+    # Optional peers for HTTPS (tcp 443, and the port of the issuer's and the
+    # registry's URL when it is not 443). Empty: any destination, which is
+    # what a registry or an issuer behind a CDN or a cloud endpoint needs.
+    https: []
+    # Optional peers for DNS (UDP and TCP 53). Empty: any destination, which
+    # works on every cluster; narrow it only to where YOUR resolver is.
+    dns: []
+  extraEgress: []
+
+# Optional: ONE gateway.networking.k8s.io/v1 HTTPRoute for the server, in the
+# release namespace, shipped with the Service on purpose (a route whose
+# backend arrives later reads BackendNotFound). Rules, from the path of
+# resourceURL (say /mcp): PathPrefix /mcp and PathPrefix
+# /.well-known/oauth-protected-resource/mcp, and Exact
+# /.well-known/oauth-protected-resource, all to the Service (the proxy's
+# port), no filters. NO request timeout (`timeouts.request: 0s`): MCP may hold
+# a response open as a stream, and a gateway's default would cut it.
+httpRoute:
+  enabled: false
+  # Optional: the route's name; defaults to the fullname.
+  name: ""
+  # Required while enabled. Passed through as written: group, kind, name,
+  # namespace, sectionName (port too). Example, a ListenerSet:
+  #   - {group: gateway.networking.k8s.io, kind: ListenerSet, name: mcp, namespace: gateway}
+  parentRefs: []
+  # Optional. When set, the host of resourceURL must be one of these.
+  hostnames: []
+  annotations: {}
+  labels: {}

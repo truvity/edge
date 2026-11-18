@@ -1,0 +1,4 @@
+registry:
+  auth: dockerconfig
+  ack:
+    enabled: true

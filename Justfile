@@ -1,7 +1,7 @@
 # Development commands. Everything CI runs is a recipe here — the shared
 # check workflow (truvity/ci-workflows) runs each one as its own job.
 
-charts := "cloudflared gateway-fleet gateway-groups gateway-policies gateway-projects static-site static-site-infra"
+charts := "cloudflared docs-mcp gateway-fleet gateway-groups gateway-policies gateway-projects static-site static-site-infra"
 
 # Library charts: they render nothing by themselves, so every check that
 # needs a render goes through tests/harness/<chart>, the consumer chart
@@ -22,18 +22,25 @@ lint:
     hack/cloudflared-pin.sh check
     hack/chart-deps.sh
     for chart in {{ charts }}; do
-      helm lint "charts/$chart"
+      # A chart that refuses to render without values of the consumer's (an
+      # issuer, a digest) lists the smallest set that renders in
+      # tests/lint/<chart>.yaml. Lint, the unknown-key probe and every
+      # negative fixture start from it, so a fixture names only what it
+      # breaks and cannot fail for the missing values instead.
+      base=()
+      if [ -f "tests/lint/$chart.yaml" ]; then base=(-f "tests/lint/$chart.yaml"); fi
+      helm lint "charts/$chart" ${base[@]+"${base[@]}"}
       # An unknown top-level key must fail the render. Not `! helm
       # template ...`: bash's `set -e` ignores a command negated with `!`,
       # so such a probe could never fail the recipe.
-      if helm template x "charts/$chart" --set bogusKey=1 >/dev/null 2>&1; then
+      if helm template x "charts/$chart" ${base[@]+"${base[@]}"} --set bogusKey=1 >/dev/null 2>&1; then
         echo "$chart: an unknown key rendered" >&2
         exit 1
       fi
       # Every negative fixture must fail; one that renders is a hole in the
       # validation, which is exactly the kind of hole nobody notices.
       for values in tests/invalid/"$chart"/*.yaml; do
-        if helm template invalid "charts/$chart" -f "$values" >/dev/null 2>&1; then
+        if helm template invalid "charts/$chart" ${base[@]+"${base[@]}"} -f "$values" >/dev/null 2>&1; then
           echo "RENDERED BUT SHOULD HAVE FAILED: $values" >&2
           exit 1
         fi

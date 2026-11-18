@@ -1,0 +1,208 @@
+{{- include "docs-mcp.validate" . }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "docs-mcp.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "docs-mcp.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  # A rollout never takes a pod away before its replacement is ready.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      {{- include "docs-mcp.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "docs-mcp.selectorLabels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      serviceAccountName: {{ include "docs-mcp.serviceAccountName" . }}
+      {{- if ne .Values.registry.auth "ecr" }}
+      automountServiceAccountToken: false
+      {{- end }}
+      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if .Values.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- toYaml .Values.topologySpreadConstraints | nindent 8 }}
+      {{- else if gt (int .Values.replicaCount) 1 }}
+      # Replicas spread over zones and nodes, so one node or zone going away
+      # does not take the server with it. Soft (ScheduleAnyway): a small
+      # estate still schedules.
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              {{- include "docs-mcp.selectorLabels" . | nindent 14 }}
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              {{- include "docs-mcp.selectorLabels" . | nindent 14 }}
+      {{- end }}
+      # Pod Security Standard "restricted": non-root, a seccomp profile, no
+      # privilege escalation and no capabilities on every container.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        # The server. Loopback only for MCP: it declares no container port for
+        # it, and holds no authentication code. Its ops port serves the
+        # kubelet's probes and /metrics, nothing of the MCP surface.
+        - name: docs-mcp
+          image: {{ include "docs-mcp.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: ["serve"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          env:
+            - name: DOCS_MCP_ADDR
+              value: {{ include "docs-mcp.mcpListen" . | quote }}
+            - name: DOCS_MCP_OPS_ADDR
+              value: {{ printf ":%s" (include "docs-mcp.opsPort" .) | quote }}
+            - name: DOCS_MCP_ALLOWED_HOSTS
+              value: {{ printf "%s,127.0.0.1,localhost" (include "docs-mcp.resourceHost" .) | quote }}
+            - name: DOCS_MCP_ARTIFACT_REF
+              value: {{ .Values.pack.artifact.ref | quote }}
+            - name: DOCS_MCP_ARTIFACT_DIGEST
+              value: {{ .Values.pack.artifact.digest | quote }}
+            - name: DOCS_MCP_CONTENT_DIR
+              value: /var/run/pack
+            - name: DOCS_MCP_PLAIN_HTTP
+              value: {{ .Values.pack.plainHTTP | quote }}
+            - name: DOCS_MCP_MAX_BYTES
+              value: {{ .Values.pack.maxBytes | int64 | quote }}
+            - name: DOCS_MCP_MAX_RESPONSE_BYTES
+              value: {{ .Values.pack.maxResponseBytes | int64 | quote }}
+            - name: DOCS_MCP_LOG_LEVEL
+              value: {{ .Values.logLevel | quote }}
+            {{- if ne .Values.registry.auth "dockerconfig" }}
+            - name: DOCS_MCP_REGISTRY_AUTH
+              value: {{ .Values.registry.auth | quote }}
+            {{- end }}
+            {{- if and (eq .Values.registry.auth "dockerconfig") .Values.pack.pullSecretName }}
+            - name: DOCKER_CONFIG
+              value: /etc/registry-auth
+            {{- end }}
+          ports:
+            - name: ops
+              containerPort: {{ include "docs-mcp.opsPort" . }}
+              protocol: TCP
+          # The pack is pulled before the MCP port opens; startup allows for
+          # a slow registry without loosening liveness.
+          startupProbe:
+            httpGet:
+              path: /readyz
+              port: ops
+            periodSeconds: 2
+            failureThreshold: 90
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: ops
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: ops
+            periodSeconds: 5
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: content
+              mountPath: /var/run/pack
+            {{- if and (eq .Values.registry.auth "dockerconfig") .Values.pack.pullSecretName }}
+            - name: registry-auth
+              mountPath: /etc/registry-auth
+              readOnly: true
+            {{- end }}
+        # The resource-proxy: the pod's only MCP port. It checks the bearer
+        # token, writes the audit line and forwards to docs-mcp on loopback.
+        # No OUTBOUND_*: the server has no backend, so nothing is exchanged.
+        - name: proxy
+          image: {{ include "docs-mcp.proxyImage" . | quote }}
+          imagePullPolicy: {{ .Values.proxy.image.pullPolicy }}
+          securityContext:
+            runAsUser: {{ .Values.proxy.runAsUser }}
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          env:
+            - name: LISTEN
+              value: {{ printf ":%s" (include "docs-mcp.proxyPort" .) | quote }}
+            - name: UPSTREAM
+              value: {{ printf "http://%s/mcp" (include "docs-mcp.mcpListen" .) | quote }}
+            - name: ISSUER_URL
+              value: {{ .Values.issuerURL | quote }}
+            - name: RESOURCE_URL
+              value: {{ .Values.resourceURL | quote }}
+            - name: SCOPE
+              value: {{ .Values.scope | quote }}
+          ports:
+            - name: http
+              containerPort: {{ include "docs-mcp.proxyPort" . }}
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+          resources:
+            {{- toYaml .Values.proxy.resources | nindent 12 }}
+      volumes:
+        - name: content
+          emptyDir:
+            medium: Memory
+            sizeLimit: {{ .Values.pack.contentSizeLimit | quote }}
+        {{- if and (eq .Values.registry.auth "dockerconfig") .Values.pack.pullSecretName }}
+        - name: registry-auth
+          secret:
+            secretName: {{ .Values.pack.pullSecretName }}
+            items:
+              - key: .dockerconfigjson
+                path: config.json
+        {{- end }}

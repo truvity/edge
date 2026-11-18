@@ -1,0 +1,4 @@
+images:
+  identity-check:
+    repository: truvity/k8s/identity-check
+    digest: sha256:abc

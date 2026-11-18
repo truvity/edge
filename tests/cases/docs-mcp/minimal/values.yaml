@@ -1,0 +1,16 @@
+# The least a render needs: the issuer, the resource, the sidecar's tag and
+# digest, the pack's digest, and who may reach the pod.
+issuerURL: https://issuer.example.com
+resourceURL: https://docs.example.com/mcp
+proxy:
+  image:
+    tag: v1.0.0
+    digest: sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+pack:
+  artifact:
+    digest: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+networkPolicy:
+  ingressFrom:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: gateway

@@ -1,0 +1,24 @@
+{{- /*
+Proof that a pod admitted now gets the server's cloud identity, before the
+Deployment exists (truvity/policy service-lib's identityCheck, decision 0013;
+the same hook as the static-site chart's).
+
+A pre-install,pre-upgrade hook Job that runs as the server's ServiceAccount,
+which static-site-infra renders and which must already exist. Rendered exactly
+when the identity is managed (registry.auth=ecr and registry.ack.enabled);
+there is no switch. With registry.ack.accountId set (12 digits, the schema
+refuses anything else) the hook also passes `-expect-account`.
+
+The library labels the check pod from the including chart's name, and this
+chart's selectors carry the chart name and the release only. The check is
+therefore given a chart name of its own (`docs-mcp-identity-check`), so that no
+Service, PodDisruptionBudget or NetworkPolicy of the server selects it.
+*/}}
+{{- if include "docs-mcp.identityManaged" . }}
+{{- $ctx := dict "Release" .Release "Values" .Values "Chart" (dict "Name" (printf "%s-identity-check" .Chart.Name) "AppVersion" .Chart.AppVersion) }}
+{{- $platform := dict "serviceAccount" (dict "name" (include "docs-mcp.serviceAccountName" .)) }}
+---
+{{- $spec := dict "context" $ctx "name" (include "docs-mcp.name" .) "platform" $platform "cloudIdentity" true }}
+{{- with ((.Values.registry.ack).accountId) }}{{- $_ := set $spec "expectAccount" (toString .) }}{{- end }}
+{{ include "service-lib.identityCheck" $spec }}
+{{- end }}

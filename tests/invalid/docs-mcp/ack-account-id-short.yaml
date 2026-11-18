@@ -1,0 +1,7 @@
+registry:
+  auth: ecr
+  ack:
+    enabled: true
+    accountId: "12345"
+serviceAccount:
+  name: docs-mcp

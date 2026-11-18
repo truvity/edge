@@ -1,0 +1,76 @@
+{{- if .Values.httpRoute.enabled }}
+{{- $r := .Values.httpRoute }}
+{{- $path := include "docs-mcp.resourcePath" . }}
+{{- $port := .Values.service.port }}
+{{- /*
+One HTTPRoute, shipped WITH the Service on purpose: a route whose backend
+arrives later reads BackendNotFound and degrades whatever owns it.
+
+The resource path, and the path-suffixed protected-resource metadata (RFC
+9728 puts the well-known segment BEFORE the resource path), both to the
+Service; the bare metadata document too, for a host that serves one resource.
+The gateway rewrites nothing and no filter is applied.
+
+NO REQUEST TIMEOUT: MCP's streamable HTTP may hold a response open as a
+stream; a gateway's default route timeout would cut it. `timeouts.request: 0s`
+is how Gateway API v1 says "none".
+*/}}
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: {{ default (include "docs-mcp.fullname" .) $r.name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "docs-mcp.labels" . | nindent 4 }}
+    {{- with $r.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- with $r.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  parentRefs:
+    {{- toYaml $r.parentRefs | nindent 4 }}
+  {{- with $r.hostnames }}
+  hostnames:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: {{ $path }}
+      timeouts:
+        request: 0s
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: {{ include "docs-mcp.fullname" . }}
+          port: {{ $port }}
+          weight: 1
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /.well-known/oauth-protected-resource{{ $path }}
+      timeouts:
+        request: 0s
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: {{ include "docs-mcp.fullname" . }}
+          port: {{ $port }}
+          weight: 1
+    - matches:
+        - path:
+            type: Exact
+            value: /.well-known/oauth-protected-resource
+      timeouts:
+        request: 0s
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: {{ include "docs-mcp.fullname" . }}
+          port: {{ $port }}
+          weight: 1
+{{- end }}

@@ -1,0 +1,39 @@
+# The identity is static-site-infra's: no ACK objects, no ServiceAccount, and
+# the identity check hook before the Deployment. Pod Identity's agent is
+# reached through extraEgress.
+fullnameOverride: arch-mcp
+issuerURL: https://issuer.example.com
+resourceURL: https://docs.example.com/mcp
+proxy:
+  image:
+    tag: v1.0.0
+    digest: sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+registry:
+  auth: ecr
+  ack:
+    enabled: true
+pack:
+  artifact:
+    ref: registry.example.com/docs/pack
+    digest: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+serviceAccount:
+  name: arch-mcp
+networkPolicy:
+  ingressFrom:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: gateway
+  extraEgress:
+    - to:
+        - ipBlock:
+            cidr: 169.254.170.23/32
+      ports:
+        - port: 80
+          protocol: TCP
+httpRoute:
+  enabled: true
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: ListenerSet
+      name: mcp
+      namespace: gateway

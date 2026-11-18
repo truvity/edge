@@ -1,0 +1,6 @@
+httpRoute:
+  enabled: true
+  parentRefs:
+    - name: mcp
+      port: 443
+      bogus: 1
