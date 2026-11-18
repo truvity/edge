@@ -190,7 +190,7 @@ spec:
             - name: DOCS_MCP_MAX_BYTES
               value: "67108864"
             - name: DOCS_MCP_MAX_RESPONSE_BYTES
-              value: "131072"
+              value: "32768"
             - name: DOCS_MCP_MAX_CONCURRENT_CALLS
               value: "16"
             - name: DOCS_MCP_LOG_LEVEL

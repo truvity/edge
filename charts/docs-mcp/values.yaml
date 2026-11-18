@@ -91,8 +91,10 @@ pack:
   # Refuse a pack larger than this many bytes.
   maxBytes: 67108864
   # A tool result is cut to this many bytes (at least 1024); the caller pages
-  # with `offset`.
-  maxResponseBytes: 131072
+  # with `offset`. 32 KiB keeps one page under the per-result limit of common
+  # MCP clients (about 25,000 tokens); a larger page can be spilled to a file
+  # by the client instead of reaching the model.
+  maxResponseBytes: 32768
   # Tool calls running at once; the others wait their turn. With
   # maxResponseBytes, this bounds the memory a burst of calls can hold.
   maxConcurrentCalls: 16

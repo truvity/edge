@@ -70,6 +70,11 @@ type Config struct {
 // DefaultMaxConcurrentCalls is the default bound on tool calls running at once.
 const DefaultMaxConcurrentCalls = 16
 
+// DefaultMaxResponseBytes is the default cap on the text of one tool result.
+// 32 KiB keeps a page under the per-result limit of common MCP clients (about
+// 25,000 tokens), which spill a larger one to a file.
+const DefaultMaxResponseBytes = 32 << 10
+
 // MinResponseBytes is the smallest response cap the server accepts.
 const MinResponseBytes = 1024
 
@@ -81,7 +86,7 @@ func Defaults() Config {
 		ContentDir:         "/var/run/pack",
 		PullTimeout:        2 * time.Minute,
 		MaxBytes:           docspack.DefaultMaxBytes,
-		MaxResponseBytes:   128 << 10,
+		MaxResponseBytes:   DefaultMaxResponseBytes,
 		MaxConcurrentCalls: DefaultMaxConcurrentCalls,
 		ShutdownDelay:      5 * time.Second,
 	}

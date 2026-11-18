@@ -18,6 +18,7 @@ func TestFromEnvDefaultsAreLoopback(t *testing.T) {
 	assert.Equal(t, ":9090", c.OpsAddr)
 	assert.Empty(t, c.AllowedHosts)
 	assert.Equal(t, DefaultMaxConcurrentCalls, c.MaxConcurrentCalls)
+	assert.Equal(t, 32768, c.MaxResponseBytes)
 	pc := c.PullConfig()
 	assert.Equal(t, "registry.example.com/docs/pack", pc.ArtifactRef)
 	assert.Equal(t, digest, pc.ArtifactDigest)

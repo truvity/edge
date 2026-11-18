@@ -5,6 +5,12 @@ heading here is a patch cut automatically for dependency bumps alone; its
 GitHub Release lists them. The chart and the Go module are released
 together at every version.
 
+## v4.10.1
+
+### Changed
+
+- **`docs-mcp`: the default tool-result page is 32 KiB (was 128 KiB).** `pack.maxResponseBytes` (chart) and `DOCS_MCP_MAX_RESPONSE_BYTES` (server) default to `32768`. A 128 KiB page of `get_llms_context` was longer than the per-result limit of Claude Code (about 25,000 tokens), so the client spilled it to a file; at 32 KiB the page reaches the model directly, and the caller reads the rest with `offset`. The minimum stays 1024. A release that sets the value keeps it; one that relies on the default now pages four times as often, so set `pack.maxResponseBytes: 131072` to keep the old page. See [docs/docs-mcp.md](docs/docs-mcp.md).
+
 ## v4.10.0
 
 ### Added
