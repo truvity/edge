@@ -128,6 +128,9 @@ spec:
         app.kubernetes.io/instance: docs-mcp
     spec:
       serviceAccountName: docs-mcp
+      # Never the ServiceAccount token: Pod Identity and IRSA project the token
+      # they need themselves, and the sidecar, which checks the callers' tokens,
+      # has no use for a token that speaks for the pod.
       automountServiceAccountToken: false
       terminationGracePeriodSeconds: 40
       # Replicas spread over zones and nodes, so one node or zone going away
@@ -188,6 +191,8 @@ spec:
               value: "67108864"
             - name: DOCS_MCP_MAX_RESPONSE_BYTES
               value: "131072"
+            - name: DOCS_MCP_MAX_CONCURRENT_CALLS
+              value: "16"
             - name: DOCS_MCP_LOG_LEVEL
               value: "info"
           ports:

@@ -16,6 +16,10 @@ together at every version.
 - **`docs-mcp`: a documentation site as an MCP server (`cmd/docs-mcp`, `charts/docs-mcp`).** `docs-mcp pack --in <dir> --out <dir>` turns a directory of Markdown (and an optional `llms.txt` and `llms-full.txt`) into a versioned pack: the documents, a manifest with a section index (heading path, anchor, byte ranges) and an inverted index for ranked search. Format version 1; the output is byte-reproducible (sorted, no host paths, a time only from `SOURCE_DATE_EPOCH`). `docs-mcp serve` pulls the pack by digest with the `static-site` puller, refuses a format version it does not read, and serves `search_docs`, `list_docs`, `read_doc` and `get_llms_context` over MCP (Streamable HTTP, stateless) on loopback, with `/healthz`, `/readyz` and `/metrics` on an ops port. It holds no authentication code. The chart runs it behind the sluis `resource-proxy` sidecar (the only container that accepts MCP from outside the pod, pinned by tag and digest), with a NetworkPolicy, an optional HTTPRoute, and the pod identity of `static-site-infra`. Releases carry the image `ghcr.io/truvity/edge/docs-mcp:<version>`, the chart `oci://ghcr.io/truvity/charts/docs-mcp:<version>`, and `docs-mcp_<version>_linux_{amd64,arm64}.tar.gz` with `edge_<version>_checksums.txt`. See [docs/docs-mcp.md](docs/docs-mcp.md).
 - **`lint`: a chart may keep the values it cannot render without in `tests/lint/<chart>.yaml`.** Lint, the unknown-key probe and every refusal fixture of that chart start from it. No existing chart has one, so nothing changes for them.
 
+### Fixed
+
+- **`static-site`: directory entries of an archive count toward `site.maxFiles`.** An archive of nothing but directories was not limited before; a site with more directories and files together than the limit now fails to load, so raise `site.maxFiles` for such a site.
+
 ## v4.9.1
 
 - Dependency updates.

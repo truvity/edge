@@ -76,6 +76,7 @@
         "plainHTTP": { "type": "boolean" },
         "maxBytes": { "type": "integer", "minimum": 1 },
         "maxResponseBytes": { "type": "integer", "minimum": 1024, "maximum": 67108864 },
+        "maxConcurrentCalls": { "type": "integer", "minimum": 1, "maximum": 4096 },
         "contentSizeLimit": { "type": "string", "minLength": 1 }
       }
     },

@@ -30,9 +30,10 @@ spec:
       {{- end }}
     spec:
       serviceAccountName: {{ include "docs-mcp.serviceAccountName" . }}
-      {{- if ne .Values.registry.auth "ecr" }}
+      # Never the ServiceAccount token: Pod Identity and IRSA project the token
+      # they need themselves, and the sidecar, which checks the callers' tokens,
+      # has no use for a token that speaks for the pod.
       automountServiceAccountToken: false
-      {{- end }}
       terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
@@ -114,6 +115,8 @@ spec:
               value: {{ .Values.pack.maxBytes | int64 | quote }}
             - name: DOCS_MCP_MAX_RESPONSE_BYTES
               value: {{ .Values.pack.maxResponseBytes | int64 | quote }}
+            - name: DOCS_MCP_MAX_CONCURRENT_CALLS
+              value: {{ .Values.pack.maxConcurrentCalls | int | quote }}
             - name: DOCS_MCP_LOG_LEVEL
               value: {{ .Values.logLevel | quote }}
             {{- if ne .Values.registry.auth "dockerconfig" }}

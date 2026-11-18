@@ -90,10 +90,17 @@ pack:
   plainHTTP: false
   # Refuse a pack larger than this many bytes.
   maxBytes: 67108864
-  # A tool result is cut to this many bytes; the caller pages with `offset`.
+  # A tool result is cut to this many bytes (at least 1024); the caller pages
+  # with `offset`.
   maxResponseBytes: 131072
+  # Tool calls running at once; the others wait their turn. With
+  # maxResponseBytes, this bounds the memory a burst of calls can hold.
+  maxConcurrentCalls: 16
   # Size of the memory-backed volume the pack is unpacked into. The unpacked
-  # copy is removed once the pack is in memory.
+  # copy is removed once the pack is in memory, but while the pack loads the
+  # volume (it counts against the container's memory), the pack's files and the
+  # index being built are held at once: set the memory limit to at least three
+  # times maxBytes (the defaults, 64 MiB and 256Mi, do).
   contentSizeLimit: 256Mi
 
 # How the server authenticates to the registry of the pack.
@@ -136,7 +143,8 @@ service:
   port: 8080
   annotations: {}
 
-# docs-mcp's own limits. The pack is held in memory once loaded.
+# docs-mcp's own limits. The pack is held in memory once loaded; keep the
+# memory limit at three times pack.maxBytes or more.
 resources:
   requests:
     cpu: 25m
@@ -181,6 +189,13 @@ podMonitor:
 # issuer's signing keys and the registry of the pack (and, with
 # registry.auth=ecr, the ECR API). `extraEgress` adds rules, verbatim: with
 # Pod Identity, the agent at 169.254.170.23/32, tcp 80.
+#
+# HTTPS and DNS egress are OPEN BY DEFAULT: tcp 443 and port 53 to any
+# destination, because a registry or an issuer behind a CDN or a cloud
+# endpoint has no address a chart can know. Name the peers in egress.https and
+# egress.dns to close them. Both containers share the pod's network, and the
+# proxy shares the pod's identity: with registry.auth=ecr the role that may
+# pull the pack is visible to it too, so keep that role to the pull.
 networkPolicy:
   enabled: true
   ingressFrom: []
