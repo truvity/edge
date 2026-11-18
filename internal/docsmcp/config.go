@@ -60,20 +60,30 @@ type Config struct {
 
 	// MaxResponseBytes caps the text of one tool result.
 	MaxResponseBytes int
+	// MaxConcurrentCalls bounds the tool calls running at once; the others
+	// wait their turn.
+	MaxConcurrentCalls int
 
 	ShutdownDelay time.Duration
 }
 
+// DefaultMaxConcurrentCalls is the default bound on tool calls running at once.
+const DefaultMaxConcurrentCalls = 16
+
+// MinResponseBytes is the smallest response cap the server accepts.
+const MinResponseBytes = 1024
+
 // Defaults returns the configuration with no environment applied.
 func Defaults() Config {
 	return Config{
-		Addr:             "127.0.0.1:8081",
-		OpsAddr:          ":9090",
-		ContentDir:       "/var/run/pack",
-		PullTimeout:      2 * time.Minute,
-		MaxBytes:         docspack.DefaultMaxBytes,
-		MaxResponseBytes: 128 << 10,
-		ShutdownDelay:    5 * time.Second,
+		Addr:               "127.0.0.1:8081",
+		OpsAddr:            ":9090",
+		ContentDir:         "/var/run/pack",
+		PullTimeout:        2 * time.Minute,
+		MaxBytes:           docspack.DefaultMaxBytes,
+		MaxResponseBytes:   128 << 10,
+		MaxConcurrentCalls: DefaultMaxConcurrentCalls,
+		ShutdownDelay:      5 * time.Second,
 	}
 }
 
@@ -95,7 +105,8 @@ var digestRE = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 //	                                     or none
 //	DOCKER_CONFIG                        directory of the Docker config file
 //	DOCS_MCP_PULL_TIMEOUT, _MAX_BYTES
-//	DOCS_MCP_MAX_RESPONSE_BYTES          cap on one tool result
+//	DOCS_MCP_MAX_RESPONSE_BYTES          cap on one tool result (at least 1024)
+//	DOCS_MCP_MAX_CONCURRENT_CALLS        tool calls running at once (16)
 //	DOCS_MCP_SHUTDOWN_DELAY
 func FromEnv(getenv func(string) string) (Config, error) {
 	c := Defaults()
@@ -148,6 +159,7 @@ func FromEnv(getenv func(string) string) (Config, error) {
 	dur("PULL_TIMEOUT", &c.PullTimeout)
 	dur("SHUTDOWN_DELAY", &c.ShutdownDelay)
 	positive("MAX_BYTES", func(n int64) { c.MaxBytes = n })
+	positive("MAX_CONCURRENT_CALLS", func(n int64) { c.MaxConcurrentCalls = int(min(n, 4096)) })
 	positive("MAX_RESPONSE_BYTES", func(n int64) { c.MaxResponseBytes = int(min(n, 64<<20)) })
 	for _, h := range strings.Split(getenv("DOCS_MCP_ALLOWED_HOSTS"), ",") {
 		if h = strings.TrimSpace(h); h != "" {
@@ -193,8 +205,14 @@ func (c *Config) Validate() error {
 			errs = append(errs, fmt.Errorf("allowed host %q is not a host name", h))
 		}
 	}
-	if c.MaxBytes <= 0 || c.MaxResponseBytes <= 0 {
-		errs = append(errs, errors.New("the byte limits must be positive"))
+	if c.MaxBytes <= 0 {
+		errs = append(errs, errors.New("DOCS_MCP_MAX_BYTES must be positive"))
+	}
+	if c.MaxResponseBytes < MinResponseBytes {
+		errs = append(errs, fmt.Errorf("DOCS_MCP_MAX_RESPONSE_BYTES: %d is under the %d a result needs", c.MaxResponseBytes, MinResponseBytes))
+	}
+	if c.MaxConcurrentCalls <= 0 {
+		errs = append(errs, errors.New("DOCS_MCP_MAX_CONCURRENT_CALLS must be positive"))
 	}
 	return errors.Join(errs...)
 }

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"unicode/utf8"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -73,7 +72,17 @@ func (s *Server) addTools(srv *mcp.Server) {
 }
 
 func addTool[In any](s *Server, srv *mcp.Server, t *mcp.Tool, fn func(In) (string, error)) {
-	mcp.AddTool(srv, t, func(_ context.Context, _ *mcp.CallToolRequest, in In) (*mcp.CallToolResult, any, error) {
+	mcp.AddTool(srv, t, func(ctx context.Context, _ *mcp.CallToolRequest, in In) (*mcp.CallToolResult, any, error) {
+		// At most MaxConcurrentCalls tool calls run at once: each may build a
+		// result of up to MaxResponseBytes, so the limit bounds the memory a
+		// burst of calls can hold. A call waits for its turn, and gives up
+		// when its request is cancelled.
+		select {
+		case s.sem <- struct{}{}:
+			defer func() { <-s.sem }()
+		case <-ctx.Done():
+			return nil, nil, ctx.Err()
+		}
 		text, err := fn(in)
 		if err != nil {
 			s.metrics.tools.WithLabelValues(t.Name, "error").Inc()
@@ -117,7 +126,7 @@ func (s *Server) search(in searchArgs) (string, error) {
 			fmt.Fprintf(&b, "   %s\n", h.Snippet)
 		}
 	}
-	return s.cut(b.String(), 0)
+	return s.cut([]byte(b.String()), 0)
 }
 
 func (s *Server) list(in listArgs) (string, error) {
@@ -141,7 +150,7 @@ func (s *Server) list(in listArgs) (string, error) {
 	for i := range docs {
 		fmt.Fprintf(&b, "%s - %s\n", docs[i].Route, docs[i].Title)
 	}
-	return s.cut(b.String(), in.Offset)
+	return s.cut([]byte(b.String()), in.Offset)
 }
 
 func (s *Server) read(in readArgs) (string, error) {
@@ -152,11 +161,11 @@ func (s *Server) read(in readArgs) (string, error) {
 	if strings.TrimSpace(in.Route) == "" {
 		return "", errors.New("the route is required")
 	}
-	_, text, err := p.Read(in.Route, in.Section)
+	_, data, err := p.Read(in.Route, in.Section)
 	if err != nil {
 		return "", err
 	}
-	return s.cut(text, in.Offset)
+	return s.cut(data, in.Offset)
 }
 
 func (s *Server) llms(in llmsArgs) (string, error) {
@@ -164,33 +173,20 @@ func (s *Server) llms(in llmsArgs) (string, error) {
 	if p == nil {
 		return "", errNoPack
 	}
-	_, text := p.LLMS()
-	return s.cut(text, in.Offset)
+	_, data := p.LLMS()
+	return s.cut(data, in.Offset)
 }
 
-// cut returns the part of text that starts at offset and is at most the
-// configured number of bytes, ending at a character boundary. When text goes
-// on, the result says where to continue.
-func (s *Server) cut(text string, offset int) (string, error) {
-	if offset < 0 {
-		return "", errors.New("offset must not be negative")
+// cut returns the part of data that starts at offset and is at most the
+// configured number of bytes, ending at a character boundary; only that part
+// is converted to text. When data goes on, the result says where to continue.
+func (s *Server) cut(data []byte, offset int) (string, error) {
+	out, end, err := docspack.Page(data, offset, s.cfg.MaxResponseBytes)
+	if err != nil {
+		return "", err
 	}
-	if offset > len(text) || (offset == len(text) && offset > 0) {
-		return "", fmt.Errorf("offset %d is past the end: the text is %d bytes", offset, len(text))
-	}
-	for offset < len(text) && !utf8.RuneStart(text[offset]) {
-		offset++
-	}
-	end := len(text)
-	if end-offset > s.cfg.MaxResponseBytes {
-		end = offset + s.cfg.MaxResponseBytes
-		for end > offset && !utf8.RuneStart(text[end]) {
-			end--
-		}
-	}
-	out := text[offset:end]
-	if end < len(text) {
-		out += fmt.Sprintf("\n\n[truncated: bytes %d-%d of %d. Call again with offset=%d to continue.]", offset, end, len(text), end)
+	if end < len(data) {
+		out += fmt.Sprintf("\n\n[truncated: bytes %d-%d of %d. Call again with offset=%d to continue.]", max(offset, 0), end, len(data), end)
 	}
 	return out, nil
 }

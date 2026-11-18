@@ -51,6 +51,8 @@ const (
 	MaxDocBytes = 8 << 20
 	// MaxSections is the number of sections of a pack.
 	MaxSections = 1_000_000
+	// MaxTitleBytes is the length of the pack's title.
+	MaxTitleBytes = 200
 	// MaxRouteBytes is the length of a route.
 	MaxRouteBytes = 512
 	// MaxAnchorBytes is the length of an anchor.

@@ -90,6 +90,9 @@ func Load(dir string, opt LoadOptions) (*Pack, error) {
 	if m.Tokenizer != Tokenizer {
 		return nil, fmt.Errorf("%w: tokenizer %q, want %q", ErrUnsupported, m.Tokenizer, Tokenizer)
 	}
+	if err := validTitle(m.Title); err != nil {
+		return nil, fmt.Errorf("manifest: %w", err)
+	}
 	if len(m.Docs) > MaxDocs {
 		return nil, fmt.Errorf("manifest lists %d documents; at most %d", len(m.Docs), MaxDocs)
 	}
@@ -161,7 +164,7 @@ func Load(dir string, opt LoadOptions) (*Pack, error) {
 		}
 	}
 	if total > 0 {
-		p.avgLen = float64(sumLen) / float64(total)
+		p.avgLen = max(1, float64(sumLen)/float64(total))
 	}
 
 	for _, f := range []struct {
@@ -191,7 +194,8 @@ func checkSections(d *Doc, size int) error {
 		if s.Start < 0 || s.Start > s.End || s.End > s.SubtreeEnd || s.SubtreeEnd > size {
 			return fmt.Errorf("section %d has bad byte ranges", i)
 		}
-		if s.Level < 0 || s.Level > MaxHeadingDepth || len(s.Heading) > MaxHeadingDepth || (s.Level == 0) != (len(s.Heading) == 0) || s.Tokens < 0 {
+		badLevel := s.Level < 0 || s.Level > MaxHeadingDepth || len(s.Heading) > MaxHeadingDepth || (s.Level == 0) != (len(s.Heading) == 0)
+		if badLevel || s.Tokens < 0 || s.Tokens > s.End-s.Start {
 			return fmt.Errorf("section %d has a bad level, heading or token count", i)
 		}
 		if s.Level > 0 && (s.Anchor == "" || len(s.Anchor) > MaxAnchorBytes || seen[s.Anchor]) {
@@ -261,10 +265,11 @@ func (p *Pack) Stats() Stats {
 	return Stats{Docs: len(p.docs), Sections: len(p.secs), Terms: len(p.terms), Bytes: p.bytes}
 }
 
-// validUTF8 makes raw file bytes safe to hand to a client as text.
+// validUTF8 makes raw file bytes safe to hand to a client as text. Callers
+// slice first: it copies what it is given.
 func validUTF8(b []byte) string {
 	if utf8.Valid(b) {
 		return string(b)
 	}
-	return string(bytes.ToValidUTF8(b, []byte("�")))
+	return string(bytes.ToValidUTF8(b, []byte("\uFFFD")))
 }

@@ -17,6 +17,7 @@ func TestFromEnvDefaultsAreLoopback(t *testing.T) {
 	assert.Equal(t, "127.0.0.1:8081", c.Addr)
 	assert.Equal(t, ":9090", c.OpsAddr)
 	assert.Empty(t, c.AllowedHosts)
+	assert.Equal(t, DefaultMaxConcurrentCalls, c.MaxConcurrentCalls)
 	pc := c.PullConfig()
 	assert.Equal(t, "registry.example.com/docs/pack", pc.ArtifactRef)
 	assert.Equal(t, digest, pc.ArtifactDigest)
@@ -73,6 +74,8 @@ func TestFromEnvRefuses(t *testing.T) {
 		"a bad duration":      {with("DOCS_MCP_PULL_TIMEOUT", "soon"), "not a duration"},
 		"a bad allowed host":  {with("DOCS_MCP_ALLOWED_HOSTS", "https://docs.example.com"), "not a host name"},
 		"a bad response size": {with("DOCS_MCP_MAX_RESPONSE_BYTES", "0"), "positive integer"},
+		"a tiny response cap": {with("DOCS_MCP_MAX_RESPONSE_BYTES", "512"), "under the 1024"},
+		"bad concurrency":     {with("DOCS_MCP_MAX_CONCURRENT_CALLS", "0"), "positive integer"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := FromEnv(env(tc.env))

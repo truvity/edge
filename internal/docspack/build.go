@@ -64,7 +64,7 @@ func Build(opt BuildOptions) (Summary, error) {
 	if st, err := os.Stat(in); err != nil || !st.IsDir() {
 		return Summary{}, fmt.Errorf("input %s is not a directory", opt.In)
 	}
-	if rel, err := filepath.Rel(in, out); err == nil && (rel == "." || !strings.HasPrefix(rel, "..")) {
+	if inside(resolveExisting(in), resolveExisting(out)) {
 		return Summary{}, fmt.Errorf("output %s is inside the input %s", opt.Out, opt.In)
 	}
 	if entries, err := os.ReadDir(out); err == nil && len(entries) > 0 {
@@ -85,8 +85,8 @@ func Build(opt BuildOptions) (Summary, error) {
 	}
 
 	opt.Title = strings.TrimSpace(opt.Title)
-	if len(opt.Title) > 200 || !utf8.ValidString(opt.Title) || strings.ContainsFunc(opt.Title, unicode.IsControl) {
-		return Summary{}, errors.New("the title is longer than 200 bytes, or not valid UTF-8, or has a control character")
+	if err := validTitle(opt.Title); err != nil {
+		return Summary{}, err
 	}
 	m := Manifest{Format: Format, FormatVersion: FormatVersion, Title: opt.Title, Tokenizer: Tokenizer}
 	if !opt.CreatedAt.IsZero() {
@@ -158,6 +158,7 @@ func Build(opt BuildOptions) (Summary, error) {
 		return Summary{}, fmt.Errorf("the pack is %d bytes, over the %d limit", total, opt.MaxBytes)
 	}
 
+	_, statErr := os.Stat(out)
 	for name, data := range files {
 		dst := filepath.Join(out, filepath.FromSlash(name))
 		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
@@ -167,7 +168,62 @@ func Build(opt BuildOptions) (Summary, error) {
 			return Summary{}, err
 		}
 	}
+	// Hold what was written to what a reader accepts, so that a writer that
+	// drifts from the reader fails here, in CI, and not as a pod that cannot
+	// start. A pack that fails is not left behind.
+	if _, err := Load(out, LoadOptions{MaxBytes: opt.MaxBytes}); err != nil {
+		cleanup(out, statErr == nil)
+		return Summary{}, fmt.Errorf("the pack it wrote is not one a reader accepts: %w", err)
+	}
 	return Summary{Docs: len(m.Docs), Sections: idx.Sections, Terms: len(idx.Postings), Bytes: total}, nil
+}
+
+// cleanup removes what Build wrote: the output directory when Build made it,
+// else only what is in it (the directory was empty).
+func cleanup(out string, existedBefore bool) {
+	if !existedBefore {
+		_ = os.RemoveAll(out)
+		return
+	}
+	entries, _ := os.ReadDir(out)
+	for _, e := range entries {
+		_ = os.RemoveAll(filepath.Join(out, e.Name()))
+	}
+}
+
+// validTitle holds a title to what a reader accepts.
+func validTitle(t string) error {
+	if len(t) > MaxTitleBytes || !utf8.ValidString(t) || strings.ContainsFunc(t, unicode.IsControl) {
+		return fmt.Errorf("the title is longer than %d bytes, or not valid UTF-8, or has a control character", MaxTitleBytes)
+	}
+	return nil
+}
+
+// resolveExisting returns p with symbolic links resolved: the path itself if
+// it exists, else its nearest existing ancestor resolved and the rest put
+// back, so that an output that is not there yet is still placed correctly.
+func resolveExisting(p string) string {
+	rest := ""
+	for cur := p; ; {
+		if r, err := filepath.EvalSymlinks(cur); err == nil {
+			return filepath.Join(r, rest)
+		}
+		parent := filepath.Dir(cur)
+		if parent == cur {
+			return p
+		}
+		rest = filepath.Join(filepath.Base(cur), rest)
+		cur = parent
+	}
+}
+
+// inside reports whether path is dir or below it.
+func inside(dir, path string) bool {
+	rel, err := filepath.Rel(dir, path)
+	if err != nil {
+		return false
+	}
+	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
 }
 
 func describe(name string, data []byte) File {

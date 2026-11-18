@@ -108,10 +108,21 @@ func (m *Metrics) Instrument(next http.Handler, log func(r *http.Request, code i
 			sw.code = http.StatusOK
 		}
 		d := time.Since(start)
-		m.requests.WithLabelValues(r.Method, strconv.Itoa(sw.code)).Inc()
-		m.latency.WithLabelValues(r.Method).Observe(d.Seconds())
+		method := methodLabel(r.Method)
+		m.requests.WithLabelValues(method, strconv.Itoa(sw.code)).Inc()
+		m.latency.WithLabelValues(method).Observe(d.Seconds())
 		if log != nil {
 			log(r, sw.code, d)
 		}
 	})
+}
+
+// methodLabel keeps the method label to a few values: a caller chooses the
+// method, and a label of its own making is a series per guess.
+func methodLabel(m string) string {
+	switch m {
+	case http.MethodGet, http.MethodPost, http.MethodDelete, http.MethodOptions, http.MethodHead:
+		return m
+	}
+	return "other"
 }

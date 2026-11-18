@@ -4,8 +4,10 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -291,16 +293,19 @@ func TestReadAndResolve(t *testing.T) {
 	p := loaded(t)
 
 	for _, route := range []string{"guides/install.md", "guides/install", "/guides/install/", "./guides/install.md"} {
-		info, text, err := p.Read(route, "")
+		info, data, err := p.Read(route, "")
+		text := string(data)
 		require.NoError(t, err, route)
 		assert.Equal(t, "guides/install.md", info.Route)
 		assert.Contains(t, text, "## Troubleshooting")
 	}
-	_, text, err := p.Read("guides/install.md", "requirements")
+	_, data, err := p.Read("guides/install.md", "requirements")
+	text := string(data)
 	require.NoError(t, err)
 	assert.Equal(t, "## Requirements\n\nA 64-bit machine with network access.\n\n", text)
 
-	_, text, err = p.Read("guides/install.md", "#install")
+	_, data, err = p.Read("guides/install.md", "#install")
+	text = string(data)
 	require.NoError(t, err)
 	assert.Contains(t, text, "Troubleshooting", "a section with its subsections")
 
@@ -313,7 +318,8 @@ func TestReadAndResolve(t *testing.T) {
 		assert.ErrorIs(t, err, ErrNotFound, bad)
 	}
 
-	_, text, err = p.Read("index", "")
+	_, data, err = p.Read("index", "")
+	text = string(data)
 	require.NoError(t, err)
 	assert.Contains(t, text, "title: Welcome", "the file is returned as it is, front matter included")
 }
@@ -326,7 +332,8 @@ func TestDocsListingAndLLMS(t *testing.T) {
 	assert.Equal(t, "guides/auth.md", docs[0].Route)
 	assert.Empty(t, p.Docs("guide"), "a directory, not a prefix of a name")
 
-	name, text := p.LLMS()
+	name, llms := p.LLMS()
+	text := string(llms)
 	assert.Equal(t, LLMSName, name)
 	assert.Contains(t, text, "[Install]")
 
@@ -335,7 +342,96 @@ func TestDocsListingAndLLMS(t *testing.T) {
 	require.NoError(t, err)
 	bare, err := Load(out, LoadOptions{})
 	require.NoError(t, err)
-	name, text = bare.LLMS()
+	name, llms = bare.LLMS()
+	text = string(llms)
 	assert.Equal(t, "outline", name)
 	assert.Contains(t, text, "a.md: A")
+}
+
+func TestLongRepeatedHeadingsGetAnchorsALoaderAccepts(t *testing.T) {
+	long := strings.Repeat("a", 300)
+	multibyte := strings.Repeat("\u00e9", 200) // 400 bytes
+	in := writeTree(t, map[string]string{
+		"a.md": "# " + long + "\n\none\n\n## " + long + "\n\ntwo\n\n## " + long + "\n\nthree\n\n# " + multibyte + "\n\n# " + multibyte + "\n",
+	})
+	out := filepath.Join(t.TempDir(), "pack")
+	_, err := Build(BuildOptions{In: in, Out: out})
+	require.NoError(t, err)
+
+	p, err := Load(out, LoadOptions{})
+	require.NoError(t, err)
+	seen := map[string]bool{}
+	for _, s := range p.Manifest.Docs[0].Sections {
+		assert.LessOrEqual(t, len(s.Anchor), MaxAnchorBytes)
+		assert.True(t, utf8.ValidString(s.Anchor))
+		assert.False(t, seen[s.Anchor], "anchor %q repeated", s.Anchor)
+		seen[s.Anchor] = true
+	}
+	assert.Len(t, seen, 5)
+}
+
+func TestBuildFailsWhatALoaderWouldRefuse(t *testing.T) {
+	// A writer that drifts from the reader is caught at pack time: a title the
+	// reader refuses cannot be written, and nothing is left behind.
+	out := filepath.Join(t.TempDir(), "pack")
+	_, err := Build(BuildOptions{In: writeTree(t, map[string]string{"a.md": "# A\n"}), Out: out, Title: strings.Repeat("t", MaxTitleBytes+1)})
+	require.Error(t, err)
+	_, statErr := os.Stat(out)
+	assert.True(t, os.IsNotExist(statErr))
+}
+
+func TestLoadRefusesALongTitle(t *testing.T) {
+	out, _ := buildCorpus(t)
+	raw, err := os.ReadFile(filepath.Join(out, ManifestName))
+	require.NoError(t, err)
+	bad := replaceOnce(string(raw), `"formatVersion": 1,`, `"formatVersion": 1, "title": "`+strings.Repeat("t", MaxTitleBytes+1)+`",`)
+	require.NoError(t, os.WriteFile(filepath.Join(out, ManifestName), []byte(bad), 0o644))
+	_, err = Load(out, LoadOptions{})
+	assert.ErrorContains(t, err, "title")
+}
+
+func TestBuildRefusesAnOutputInsideTheInputThroughALink(t *testing.T) {
+	in := writeTree(t, corpus)
+	link := filepath.Join(t.TempDir(), "link")
+	require.NoError(t, os.Symlink(in, link))
+	_, err := Build(BuildOptions{In: in, Out: filepath.Join(link, "pack")})
+	assert.ErrorContains(t, err, "inside the input")
+
+	// A sibling whose name merely starts with two dots is not inside.
+	parent := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(parent, "in"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(parent, "in", "a.md"), []byte("# A\n"), 0o644))
+	_, err = Build(BuildOptions{In: filepath.Join(parent, "in"), Out: filepath.Join(parent, "..out")})
+	assert.NoError(t, err)
+}
+
+func TestPage(t *testing.T) {
+	data := []byte("h\u00e9llo w\u00f6rld")
+	text, end, err := Page(data, 0, 100)
+	require.NoError(t, err)
+	assert.Equal(t, string(data), text)
+	assert.Equal(t, len(data), end)
+
+	// The cut never splits a character, and the next page starts where it ended.
+	var got strings.Builder
+	for off := 0; off < len(data); {
+		text, end, err = Page(data, off, 2)
+		require.NoError(t, err)
+		require.Greater(t, end, off)
+		got.WriteString(text)
+		off = end
+	}
+	assert.Equal(t, string(data), got.String())
+
+	text, _, err = Page([]byte("a\xffb"), 0, 10)
+	require.NoError(t, err)
+	assert.Equal(t, "a\uFFFDb", text, "invalid bytes become the replacement character, in the part only")
+
+	for _, off := range []int{-1, len(data) + 1, len(data)} {
+		_, _, err = Page(data, off, 10)
+		assert.Error(t, err, off)
+	}
+	text, _, err = Page(nil, 0, 10)
+	require.NoError(t, err)
+	assert.Empty(t, text)
 }

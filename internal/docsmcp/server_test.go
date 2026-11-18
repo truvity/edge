@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -331,4 +332,39 @@ func TestLoadRefusesAWrongDigest(t *testing.T) {
 // fmtSscanf reads the "from-to of total" of a truncation notice.
 func fmtSscanf(rest string, from, to, total *int) (int, error) {
 	return fmt.Sscanf(rest, "%d-%d of %d.", from, to, total)
+}
+
+func TestToolCallsAreBoundedInNumber(t *testing.T) {
+	s := serverFor(t, buildPack(t, corpus), func(c *Config) { c.MaxConcurrentCalls = 1 })
+	cs := connect(t, s)
+
+	// With the one slot taken, a call waits and gives up when its context ends.
+	s.sem <- struct{}{}
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+	_, err := cs.CallTool(ctx, &mcp.CallToolParams{Name: "list_docs"})
+	require.Error(t, err)
+	<-s.sem
+
+	// Free again, a burst of calls all complete, one at a time.
+	var wg sync.WaitGroup
+	for range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			text, isErr := call(t, cs, "search_docs", map[string]any{"query": "installer"})
+			assert.False(t, isErr)
+			assert.Contains(t, text, "guides/install.md")
+		}()
+	}
+	wg.Wait()
+}
+
+func TestMethodLabelIsBounded(t *testing.T) {
+	for _, m := range []string{"GET", "POST", "DELETE", "OPTIONS", "HEAD"} {
+		assert.Equal(t, m, methodLabel(m))
+	}
+	for _, m := range []string{"PUT", "BREW", "x1234", ""} {
+		assert.Equal(t, "other", methodLabel(m))
+	}
 }

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"math/bits"
 	"sort"
 	"strings"
 	"unicode/utf8"
@@ -18,6 +19,8 @@ const (
 	minPrefixLen       = 3
 	snippetBytes       = 240
 	snippetScanBytes   = 64 << 10
+	// A query visits at most this many postings, however common its terms.
+	maxPostingsVisited = 2_000_000
 
 	bm25K1 = 1.2
 	bm25B  = 0.75
@@ -105,26 +108,28 @@ func (p *Pack) Resolve(route string) (int, bool) {
 	return 0, false
 }
 
-// Read returns the text of a document, or of one of its sections with their
-// subsections when anchor is not empty, as raw Markdown.
-func (p *Pack) Read(route, anchor string) (DocInfo, string, error) {
+// Read returns the bytes of a document, or of one of its sections with their
+// subsections when anchor is not empty, as raw Markdown. The slice is the
+// pack's own memory: do not change it. It is not checked to be UTF-8; Page
+// does that for the part a caller takes.
+func (p *Pack) Read(route, anchor string) (DocInfo, []byte, error) {
 	i, ok := p.Resolve(route)
 	if !ok {
-		return DocInfo{}, "", fmt.Errorf("%w: no document %q (list_docs shows the routes)", ErrNotFound, route)
+		return DocInfo{}, nil, fmt.Errorf("%w: no document %q (list_docs shows the routes)", ErrNotFound, route)
 	}
 	d := &p.Manifest.Docs[i]
 	info := DocInfo{Route: d.Route, URL: d.URL, Title: d.Title, Sections: len(d.Sections)}
 	data := p.docs[i].data
 	if anchor == "" {
-		return info, validUTF8(data), nil
+		return info, data, nil
 	}
 	anchor = strings.TrimPrefix(strings.TrimSpace(anchor), "#")
 	for j := range d.Sections {
 		if s := &d.Sections[j]; s.Anchor == anchor && s.Level > 0 {
-			return info, validUTF8(data[s.Start:s.SubtreeEnd]), nil
+			return info, data[s.Start:s.SubtreeEnd], nil
 		}
 	}
-	return info, "", fmt.Errorf("%w: %q has no section %q; its sections: %s", ErrNotFound, d.Route, anchor, p.anchorList(d))
+	return info, nil, fmt.Errorf("%w: %q has no section %q; its sections: %s", ErrNotFound, d.Route, anchor, p.anchorList(d))
 }
 
 func (p *Pack) anchorList(d *Doc) string {
@@ -144,14 +149,39 @@ func (p *Pack) anchorList(d *Doc) string {
 	return strings.Join(parts, ", ")
 }
 
+// Page returns the part of data that starts at offset and is at most limit
+// bytes, made valid UTF-8, and the offset it ends at; the part ends before
+// len(data) when there is more. Only the part is copied, so a caller that
+// pages through a large file never converts all of it. A part starts and ends
+// at a character boundary.
+func Page(data []byte, offset, limit int) (text string, end int, err error) {
+	if offset < 0 {
+		return "", 0, errors.New("offset must not be negative")
+	}
+	if offset > len(data) || (offset == len(data) && offset > 0) {
+		return "", 0, fmt.Errorf("offset %d is past the end: the text is %d bytes", offset, len(data))
+	}
+	for offset < len(data) && !utf8.RuneStart(data[offset]) {
+		offset++
+	}
+	end = len(data)
+	if end-offset > limit {
+		end = offset + limit
+		for end > offset && !utf8.RuneStart(data[end]) {
+			end--
+		}
+	}
+	return validUTF8(data[offset:end]), end, nil
+}
+
 // LLMS returns the llms-full.txt of the site, else its llms.txt, else an
 // outline of the pack's documents; name says which one it is.
-func (p *Pack) LLMS() (name, text string) {
+func (p *Pack) LLMS() (name string, text []byte) {
 	switch {
 	case p.llmsFull != nil:
-		return LLMSFullName, validUTF8(p.llmsFull)
+		return LLMSFullName, p.llmsFull
 	case p.llms != nil:
-		return LLMSName, validUTF8(p.llms)
+		return LLMSName, p.llms
 	}
 	var b strings.Builder
 	b.WriteString("# Documentation outline\n\nThis pack carries no llms.txt; these are its documents. Read one with read_doc.\n\n")
@@ -159,7 +189,7 @@ func (p *Pack) LLMS() (name, text string) {
 		d := &p.Manifest.Docs[i]
 		fmt.Fprintf(&b, "- %s: %s\n", d.Route, d.Title)
 	}
-	return "outline", b.String()
+	return "outline", []byte(b.String())
 }
 
 type scored struct {
@@ -191,24 +221,27 @@ func (p *Pack) Search(query string, opt SearchOptions) ([]Hit, error) {
 
 	n := float64(len(p.secs))
 	scores := map[int]float64{}
-	matched := map[int]map[string]bool{}
-	add := func(qterm, term string, weight float64) {
+	// matched has bit i set for a section that holds query term i; at most
+	// maxQueryTerms terms, so a uint16 is enough.
+	matched := map[int]uint16{}
+	visited := 0
+	add := func(qi int, term string, weight float64) {
 		posts := p.postings[term]
 		idf := math.Log(1 + (n-float64(len(posts))+0.5)/(float64(len(posts))+0.5))
 		for _, e := range posts {
+			if visited++; visited > maxPostingsVisited {
+				return
+			}
 			tf := float64(e[1])
-			length := float64(p.Manifest.Docs[p.secs[e[0]].doc].Sections[p.secs[e[0]].idx].Tokens)
+			length := max(1, float64(p.Manifest.Docs[p.secs[e[0]].doc].Sections[p.secs[e[0]].idx].Tokens))
 			norm := tf * (bm25K1 + 1) / (tf + bm25K1*(1-bm25B+bm25B*length/p.avgLen))
 			scores[e[0]] += weight * idf * norm
-			if matched[e[0]] == nil {
-				matched[e[0]] = map[string]bool{}
-			}
-			matched[e[0]][qterm] = true
+			matched[e[0]] |= 1 << qi
 		}
 	}
-	for _, t := range terms {
+	for qi, t := range terms {
 		if _, ok := p.postings[t]; ok {
-			add(t, t, 1)
+			add(qi, t, 1)
 		}
 		if utf8.RuneCountInString(t) < minPrefixLen {
 			continue
@@ -218,7 +251,7 @@ func (p *Pack) Search(query string, opt SearchOptions) ([]Hit, error) {
 		i := sort.SearchStrings(p.terms, t)
 		for k := 0; k < maxPrefixTerms && i+k < len(p.terms) && strings.HasPrefix(p.terms[i+k], t); k++ {
 			if p.terms[i+k] != t {
-				add(t, p.terms[i+k], prefixWeight)
+				add(qi, p.terms[i+k], prefixWeight)
 			}
 		}
 	}
@@ -230,9 +263,9 @@ func (p *Pack) Search(query string, opt SearchOptions) ([]Hit, error) {
 			continue
 		}
 		s := &p.Manifest.Docs[ref.doc].Sections[ref.idx]
-		sc += p.headingBoost(s, terms)
+		sc += headingBoost(s, terms)
 		// A section that holds every term outranks one that holds some.
-		sc *= 1 + float64(len(matched[sec]))/float64(len(terms))
+		sc *= 1 + float64(bits.OnesCount16(matched[sec]))/float64(len(terms))
 		hits = append(hits, scored{sec, sc})
 	}
 	sort.Slice(hits, func(a, b int) bool {
@@ -262,43 +295,27 @@ func (p *Pack) Search(query string, opt SearchOptions) ([]Hit, error) {
 }
 
 // headingBoost adds to the score for each query term found in the section's
-// own heading, and less for each found in the headings above it.
-func (p *Pack) headingBoost(s *Section, terms []string) float64 {
+// own heading, and less for each found in the headings above it. A query term
+// matches a heading term it equals or is the start of.
+func headingBoost(s *Section, terms []string) float64 {
 	if len(s.Heading) == 0 {
 		return 0
 	}
-	own := map[string]bool{}
-	for _, t := range Terms(s.Heading[len(s.Heading)-1]) {
-		own[t] = true
+	var own, parent uint16
+	mark := func(mask *uint16, h string) {
+		Tokenize(h, func(t string) {
+			for i, q := range terms {
+				if t == q || (utf8.RuneCountInString(q) >= minPrefixLen && strings.HasPrefix(t, q)) {
+					*mask |= 1 << i
+				}
+			}
+		})
 	}
-	parent := map[string]bool{}
+	mark(&own, s.Heading[len(s.Heading)-1])
 	for _, h := range s.Heading[:len(s.Heading)-1] {
-		for _, t := range Terms(h) {
-			parent[t] = true
-		}
+		mark(&parent, h)
 	}
-	var b float64
-	for _, t := range terms {
-		switch {
-		case own[t] || hasPrefixTerm(own, t):
-			b += ownHeadingBoost
-		case parent[t] || hasPrefixTerm(parent, t):
-			b += parentHeadingBoost
-		}
-	}
-	return b
-}
-
-func hasPrefixTerm(set map[string]bool, prefix string) bool {
-	if utf8.RuneCountInString(prefix) < minPrefixLen {
-		return false
-	}
-	for t := range set {
-		if strings.HasPrefix(t, prefix) {
-			return true
-		}
-	}
-	return false
+	return ownHeadingBoost*float64(bits.OnesCount16(own)) + parentHeadingBoost*float64(bits.OnesCount16(parent&^own))
 }
 
 // snippet picks the line of the section that holds the most query terms (the
@@ -307,10 +324,11 @@ func hasPrefixTerm(set map[string]bool, prefix string) bool {
 func (p *Pack) snippet(ref secRef, terms []string) string {
 	d := &p.Manifest.Docs[ref.doc]
 	s := &d.Sections[ref.idx]
-	text := validUTF8(p.docs[ref.doc].data[s.Start:s.End])
-	if len(text) > snippetScanBytes {
-		text = strings.ToValidUTF8(text[:snippetScanBytes], "")
+	raw := p.docs[ref.doc].data[s.Start:s.End]
+	if len(raw) > snippetScanBytes {
+		raw = raw[:snippetScanBytes]
 	}
+	text := validUTF8(raw)
 	best, bestN, first := "", 0, ""
 	for k, line := range strings.Split(text, "\n") {
 		line = strings.TrimSpace(line)
