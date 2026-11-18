@@ -195,6 +195,15 @@ func TestPullLimits(t *testing.T) {
 	assert.ErrorContains(t, err, "more than 1 files")
 }
 
+func TestPullCountsDirectoriesTowardTheFileLimit(t *testing.T) {
+	data := makeTar(t, true, []tarEntry{{name: "d1/", typ: tar.TypeDir}, {name: "d2/", typ: tar.TypeDir}, {name: "d3/", typ: tar.TypeDir}})
+	host, dgst := pushLayers(t, map[string]layer{"a": {mt: ocispec.MediaTypeImageLayerGzip, data: data, unpack: true}}, []string{"a"})
+	cfg := pullCfg(host, "", dgst.String())
+	cfg.MaxFiles = 2
+	_, err := Pull(t.Context(), cfg, t.TempDir())
+	assert.ErrorContains(t, err, "more than 2 files")
+}
+
 func TestPullErrors(t *testing.T) {
 	host, _ := pushLayers(t, map[string]layer{"a": {mt: "text/plain", title: "x", data: []byte("x")}}, []string{"a"})
 	_, err := Pull(t.Context(), pullCfg(host, ":nope", ""), t.TempDir())
