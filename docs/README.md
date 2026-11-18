@@ -59,3 +59,9 @@ documents. Read the half you adopt.
 
 - [static-site.md](static-site.md): the generic static-site server, its OCI artifact
   format, caching and placeholder rules, the chart, and the release
+
+## MCP packs (`cmd/docs-mcp`, chart `docs-mcp`)
+
+- [docs-mcp.md](docs-mcp.md): `docs-mcp pack` and the versioned pack format,
+  `docs-mcp serve` and its four tools, the chart behind the sluis
+  resource-proxy sidecar, and how CI gets the binary
