@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"strings"
 
@@ -34,6 +35,12 @@ const (
 // and with it the ECR token, between pulls.
 func Pull(ctx context.Context, cfg *Config, dest string) (digest.Digest, error) {
 	return pullWith(ctx, cfg, dest, newRegistryAuth(cfg, nil))
+}
+
+// PullLogged is Pull with the registry authentication method (never a
+// credential) reported to log.
+func PullLogged(ctx context.Context, cfg *Config, dest string, log *slog.Logger) (digest.Digest, error) {
+	return pullWith(ctx, cfg, dest, newRegistryAuth(cfg, log))
 }
 
 // pullWith pulls with ra. When an ECR registry refuses the cached token (401)
