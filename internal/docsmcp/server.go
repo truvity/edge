@@ -30,12 +30,13 @@ type Server struct {
 	metrics  *Metrics
 	pack     atomic.Pointer[docspack.Pack]
 	draining atomic.Bool
+	sem      chan struct{}
 	mcp      atomic.Pointer[mcp.Server]
 }
 
 // New returns a server with no pack loaded yet. version is the build's.
 func New(cfg *Config, version string, log *slog.Logger) *Server {
-	s := &Server{cfg: cfg, log: log, version: version, metrics: NewMetrics()}
+	s := &Server{cfg: cfg, log: log, version: version, metrics: NewMetrics(), sem: make(chan struct{}, max(1, cfg.MaxConcurrentCalls))}
 	s.mcp.Store(s.newMCP(""))
 	return s
 }

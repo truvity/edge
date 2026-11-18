@@ -110,18 +110,26 @@ type anchors struct {
 
 func newAnchors() *anchors { return &anchors{used: map[string]bool{}, count: map[string]int{}} }
 
-func (a *anchors) next(base string) string {
-	if len(base) > MaxAnchorBytes {
-		base = strings.ToValidUTF8(base[:MaxAnchorBytes], "")
+// fit joins base and suffix, cutting base (at a character boundary) so that
+// the result is at most MaxAnchorBytes: a numbered anchor is as long as an
+// unnumbered one may be, and no more.
+func fit(base, suffix string) string {
+	if limit := MaxAnchorBytes - len(suffix); len(base) > limit {
+		base = strings.ToValidUTF8(base[:limit], "")
 	}
+	return base + suffix
+}
+
+func (a *anchors) next(base string) string {
+	base = fit(base, "")
 	n := a.count[base]
 	cand := base
 	if n > 0 {
-		cand = base + "-" + strconv.Itoa(n)
+		cand = fit(base, "-"+strconv.Itoa(n))
 	}
 	for a.used[cand] {
 		n++
-		cand = base + "-" + strconv.Itoa(n)
+		cand = fit(base, "-"+strconv.Itoa(n))
 	}
 	a.count[base] = n + 1
 	a.used[cand] = true
