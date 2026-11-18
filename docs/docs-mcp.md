@@ -48,6 +48,10 @@ path is recorded, and the only time is the one `SOURCE_DATE_EPOCH` gives. So a
 pack pushed twice has one digest, and a re-run after a half-failed release
 finds the artifact already present.
 
+`pack` ends by loading what it wrote with the reader's own checks, so a writer
+that drifts from the reader fails in CI and not as a pod that cannot start; a
+pack that fails is not left behind.
+
 Exit status: 0 on success, 1 when the input cannot be packed (nothing to pack,
 a symlink, a limit exceeded), 2 for a usage error.
 
@@ -130,7 +134,8 @@ Configured by environment, like `static-site`:
 | `DOCS_MCP_ALLOWED_HOSTS` | any | comma list of `Host` headers the MCP listener answers |
 | `DOCS_MCP_REGISTRY_AUTH`, `DOCKER_CONFIG`, `DOCS_MCP_PLAIN_HTTP`, `DOCS_MCP_PULL_TIMEOUT` | | as for [static-site](static-site.md#registry-authentication): the same puller |
 | `DOCS_MCP_MAX_BYTES` | 64 MiB | cap on the pack |
-| `DOCS_MCP_MAX_RESPONSE_BYTES` | 128 KiB | cap on the text of one tool result |
+| `DOCS_MCP_MAX_RESPONSE_BYTES` | 128 KiB | cap on the text of one tool result (at least 1024) |
+| `DOCS_MCP_MAX_CONCURRENT_CALLS` | 16 | tool calls running at once; the others wait their turn. With the response cap it bounds the memory a burst of calls can hold |
 | `DOCS_MCP_LOG_LEVEL`, `DOCS_MCP_SHUTDOWN_DELAY` | `info`, `5s` | |
 
 The pull is the one of `cmd/static-site` (`internal/staticsite.Pull`): an
@@ -181,7 +186,10 @@ Release assets, for a CI that cannot run a container: every release carries
 `docs-mcp_<version>_linux_amd64.tar.gz` and `docs-mcp_<version>_linux_arm64.tar.gz`
 (the binary and the licence) and one checksums file,
 `edge_<version>_checksums.txt` (SHA-256, one line per archive of the release).
-Download by version and check the checksum:
+Download by version and check the checksum. The checksum file comes from the
+same release as the archive, so it protects against a damaged download, not
+against a tampered release: to guard against that, pin the SHA-256 of the
+archive in your own repository, where a change is a reviewed commit.
 
 ```sh
 v=4.10.0   # the release you pin
@@ -260,8 +268,25 @@ from `networkPolicy.metricsFrom` (the kubelet's probes are not subject to a
 NetworkPolicy). Egress: DNS (port 53 to any destination, or to
 `networkPolicy.egress.dns`), HTTPS to `networkPolicy.egress.https` or any
 destination (443, plus the port of `issuerURL` or of the registry host when
-they name another), and `networkPolicy.extraEgress`. The server's MCP listener
-is on loopback, so nothing outside the pod can reach it whatever the policy.
+they name another), and `networkPolicy.extraEgress`. **HTTPS and DNS egress are open by default** (port 443 and port 53 to any
+destination), because a registry or an issuer behind a CDN or a cloud endpoint
+has no address a chart can know; name the peers in `egress.https` and
+`egress.dns` to close them. The server's MCP listener is on loopback, so
+nothing outside the pod can reach it whatever the policy.
+
+### Identity and memory
+
+The pod mounts no ServiceAccount token (`automountServiceAccountToken: false`,
+always): Pod Identity and IRSA project the token they need themselves. Both
+containers share the pod's network and identity, so with `registry.auth: ecr`
+the role that may pull the pack is available to the sidecar too: keep that role
+to the pull.
+
+The pack is unpacked into a memory-backed volume (counted against the
+container's memory), then loaded, then the unpacked copy is removed. At the
+peak the volume, the files in memory and the index being built are held at
+once: set the memory limit to at least three times `pack.maxBytes`. The
+defaults (64 MiB and 256Mi) do.
 
 ### Routing
 

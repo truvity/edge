@@ -265,7 +265,8 @@ serviceAccount:
 
 	assert.Equal(t, "sha256:"+strings.Repeat("a", 64), env["DOCS_MCP_ARTIFACT_DIGEST"])
 	assert.Equal(t, "ecr", env["DOCS_MCP_REGISTRY_AUTH"])
-	assert.Nil(t, at(t, dep, "spec", "template", "spec", "automountServiceAccountToken"), "the ServiceAccount token is mounted for IRSA")
+	assert.Equal(t, false, at(t, dep, "spec", "template", "spec", "automountServiceAccountToken"),
+		"Pod Identity and IRSA project their own token: the ServiceAccount's is never mounted")
 }
 
 const identityValues = `
