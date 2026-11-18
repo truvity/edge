@@ -82,6 +82,11 @@ func extractTar(r io.Reader, dest string, lim *limits) error {
 		}
 		switch hdr.Typeflag {
 		case tar.TypeDir:
+			// A directory counts toward the file limit: an archive of nothing
+			// but directory entries is as much work to unpack as one of files.
+			if err := lim.file(); err != nil {
+				return err
+			}
 			if err := root.MkdirAll(p, 0o755); err != nil {
 				return err
 			}
