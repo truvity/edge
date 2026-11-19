@@ -5,6 +5,12 @@ heading here is a patch cut automatically for dependency bumps alone; its
 GitHub Release lists them. The chart and the Go module are released
 together at every version.
 
+## v4.11.1
+
+### Fixed
+
+- **`gateway-fleet`: the xDS rules of the NetworkPolicies name the other side's namespace when an exposure has a namespace of its own.** An exposure whose `namespace` differs from `controllerNetworkPolicy.namespace` rendered an xDS egress rule with a pod selector alone, which means the exposure's own namespace, and the controller's policy admitted xDS only from proxies of its own namespace. With proxies running in the exposure's namespace they could not reach the controller. The exposure's rule now selects the controller in `controllerNetworkPolicy.namespace`, and the controller's policy admits the proxies of each such namespace. An install whose exposures all live in the controller's namespace renders as before.
+
 ## v4.11.0
 
 ### Added

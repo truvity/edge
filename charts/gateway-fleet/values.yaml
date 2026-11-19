@@ -121,7 +121,11 @@ exposures: {}
 #  public:
 #    enabled: true
 #    class: internal                # required; must name an enabled class
-#    namespace: ""                  # default: the class namespace
+#    namespace: ""                  # default: the class namespace. Its own
+#                                   # namespace: the xDS rules of its
+#                                   # NetworkPolicy and of the controller's
+#                                   # name the other side's namespace
+#                                   # (controllerNetworkPolicy.namespace).
 #    gatewayName: ""                # default: the map key
 #    annotations: {}
 #    labels: {}
@@ -291,7 +295,8 @@ controllerNetworkPolicy:
   # The controller's pod labels, as upstream's chart sets them.
   podLabels:
     control-plane: envoy-gateway
-  # xDS from the proxies (same namespace).
+  # xDS from the proxies: this namespace, and the namespace of every exposure
+  # that has one of its own.
   xds:
     port: 18000
     proxyPodLabels:
