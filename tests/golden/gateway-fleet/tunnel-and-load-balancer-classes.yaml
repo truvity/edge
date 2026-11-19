@@ -1,0 +1,588 @@
+---
+# Source: gateway-fleet/templates/controller-networkpolicy.yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: envoy-gateway
+  namespace: envoy-gateway-system
+spec:
+  podSelector:
+    matchLabels:
+      control-plane: envoy-gateway
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # xDS from the proxies.
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: envoy
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: edge-staff-nlb
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: envoy
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: edge-tenant-a-cloudflare
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: envoy
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: edge-tenant-b-cloudflare
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: envoy
+      ports:
+        - port: 18000
+          protocol: TCP
+  egress:
+    # The API server.
+    - to:
+        - ipBlock:
+            cidr: 10.0.0.1/32
+      ports:
+        - port: 443
+          protocol: TCP
+    # Cluster DNS.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+
+---
+# Source: gateway-fleet/templates/networkpolicy.yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: envoy-staff-nlb
+  namespace: edge-staff-nlb
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: envoy
+      gateway.envoyproxy.io/owning-gateway-name: staff-nlb
+      gateway.envoyproxy.io/owning-gateway-namespace: edge-staff-nlb
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+      - ipBlock:
+          cidr: 10.0.0.0/14
+      ports:
+      - port: 10443
+        protocol: TCP
+  egress:
+    # xDS to the controller. Structural: without it the proxies never receive
+    # a configuration and the exposure is dark, whatever else is allowed.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: envoy-gateway-system
+          podSelector:
+            matchLabels:
+              control-plane: envoy-gateway
+      ports:
+        - port: 18000
+          protocol: TCP
+
+---
+# Source: gateway-fleet/templates/networkpolicy.yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: envoy-tenant-a-cloudflare
+  namespace: edge-tenant-a-cloudflare
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: envoy
+      gateway.envoyproxy.io/owning-gateway-name: tenant-a-cloudflare
+      gateway.envoyproxy.io/owning-gateway-namespace: edge-tenant-a-cloudflare
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+      - podSelector:
+          matchLabels:
+            app.kubernetes.io/name: tunnel-client
+      ports:
+      - port: 10443
+        protocol: TCP
+  egress:
+    # xDS to the controller. Structural: without it the proxies never receive
+    # a configuration and the exposure is dark, whatever else is allowed.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: envoy-gateway-system
+          podSelector:
+            matchLabels:
+              control-plane: envoy-gateway
+      ports:
+        - port: 18000
+          protocol: TCP
+
+---
+# Source: gateway-fleet/templates/networkpolicy.yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: envoy-tenant-b-cloudflare
+  namespace: edge-tenant-b-cloudflare
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: envoy
+      gateway.envoyproxy.io/owning-gateway-name: tenant-b-cloudflare
+      gateway.envoyproxy.io/owning-gateway-namespace: edge-tenant-b-cloudflare
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+      - podSelector:
+          matchLabels:
+            app.kubernetes.io/name: tunnel-client
+      ports:
+      - port: 10443
+        protocol: TCP
+  egress:
+    # xDS to the controller. Structural: without it the proxies never receive
+    # a configuration and the exposure is dark, whatever else is allowed.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: envoy-gateway-system
+          podSelector:
+            matchLabels:
+              control-plane: envoy-gateway
+      ports:
+        - port: 18000
+          protocol: TCP
+
+---
+# Source: gateway-fleet/templates/exposure.yaml
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: staff-nlb-health-tls
+  namespace: edge-staff-nlb
+spec:
+  secretName: staff-nlb-health-tls
+  dnsNames:
+    - "gateway-health.staff.internal.example"
+  privateKey:
+    rotationPolicy: Always
+  issuerRef:
+    group: cert-manager.io
+    kind: ClusterIssuer
+    name: example-private-ca
+
+---
+# Source: gateway-fleet/templates/exposure.yaml
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: tenant-a-cloudflare-health-tls
+  namespace: edge-tenant-a-cloudflare
+spec:
+  secretName: tenant-a-cloudflare-health-tls
+  dnsNames:
+    - "gateway-health.tenant-a.example.com"
+  privateKey:
+    rotationPolicy: Always
+  issuerRef:
+    group: cert-manager.io
+    kind: ClusterIssuer
+    name: example-origin-ca
+
+---
+# Source: gateway-fleet/templates/exposure.yaml
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: tenant-b-cloudflare-health-tls
+  namespace: edge-tenant-b-cloudflare
+spec:
+  secretName: tenant-b-cloudflare-health-tls
+  dnsNames:
+    - "gateway-health.tenant-b.example.com"
+  privateKey:
+    rotationPolicy: Always
+  issuerRef:
+    group: cert-manager.io
+    kind: ClusterIssuer
+    name: example-origin-ca
+
+---
+# Source: gateway-fleet/templates/exposure.yaml
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: ClientTrafficPolicy
+metadata:
+  name: staff-nlb-tls
+  namespace: edge-staff-nlb
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: staff-nlb
+  tls:
+    minVersion: "1.3"
+    maxVersion: "1.3"
+
+---
+# Source: gateway-fleet/templates/exposure.yaml
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: ClientTrafficPolicy
+metadata:
+  name: tenant-a-cloudflare-tls
+  namespace: edge-tenant-a-cloudflare
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: tenant-a-cloudflare
+  tls:
+    minVersion: "1.3"
+    maxVersion: "1.3"
+
+---
+# Source: gateway-fleet/templates/exposure.yaml
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: ClientTrafficPolicy
+metadata:
+  name: tenant-b-cloudflare-tls
+  namespace: edge-tenant-b-cloudflare
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: tenant-b-cloudflare
+  tls:
+    minVersion: "1.3"
+    maxVersion: "1.3"
+
+---
+# Source: gateway-fleet/templates/exposure.yaml
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: EnvoyProxy
+metadata:
+  name: staff-nlb-proxy
+  namespace: edge-staff-nlb
+spec:
+  provider:
+    kubernetes:
+      envoyDeployment:
+        replicas: 3
+      envoyPDB:
+        maxUnavailable: 1
+      envoyService:
+        annotations:
+          example.com/load-balancer-scheme: internal
+        loadBalancerClass: example.com/network-load-balancer
+        loadBalancerSourceRanges:
+        - 10.0.0.0/14
+        name: envoy-staff-nlb
+        type: LoadBalancer
+    type: Kubernetes
+
+---
+# Source: gateway-fleet/templates/exposure.yaml
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: EnvoyProxy
+metadata:
+  name: tenant-a-cloudflare-proxy
+  namespace: edge-tenant-a-cloudflare
+spec:
+  provider:
+    kubernetes:
+      envoyDeployment:
+        replicas: 3
+      envoyPDB:
+        maxUnavailable: 1
+      envoyService:
+        name: envoy-tenant-a-cloudflare
+        type: ClusterIP
+    type: Kubernetes
+
+---
+# Source: gateway-fleet/templates/exposure.yaml
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: EnvoyProxy
+metadata:
+  name: tenant-b-cloudflare-proxy
+  namespace: edge-tenant-b-cloudflare
+spec:
+  provider:
+    kubernetes:
+      envoyDeployment:
+        replicas: 3
+      envoyPDB:
+        maxUnavailable: 1
+      envoyService:
+        name: envoy-tenant-b-cloudflare
+        type: ClusterIP
+    type: Kubernetes
+
+---
+# Source: gateway-fleet/templates/exposure.yaml
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: staff-nlb
+  namespace: edge-staff-nlb
+spec:
+  gatewayClassName: nlb
+  infrastructure:
+    parametersRef:
+      group: gateway.envoyproxy.io
+      kind: EnvoyProxy
+      name: staff-nlb-proxy
+  allowedListeners:
+    namespaces:
+      from: Same
+  listeners:
+    - name: https
+      protocol: HTTPS
+      port: 443
+      hostname: "gateway-health.staff.internal.example"
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - group: ""
+            kind: Secret
+            name: staff-nlb-health-tls
+      allowedRoutes:
+        kinds:
+        - group: gateway.networking.k8s.io
+          kind: HTTPRoute
+        namespaces:
+          from: Same
+
+---
+# Source: gateway-fleet/templates/exposure.yaml
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: tenant-a-cloudflare
+  namespace: edge-tenant-a-cloudflare
+spec:
+  gatewayClassName: cloudflare
+  infrastructure:
+    parametersRef:
+      group: gateway.envoyproxy.io
+      kind: EnvoyProxy
+      name: tenant-a-cloudflare-proxy
+  allowedListeners:
+    namespaces:
+      from: Same
+  listeners:
+    - name: https
+      protocol: HTTPS
+      port: 443
+      hostname: "gateway-health.tenant-a.example.com"
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - group: ""
+            kind: Secret
+            name: tenant-a-cloudflare-health-tls
+      allowedRoutes:
+        kinds:
+        - group: gateway.networking.k8s.io
+          kind: HTTPRoute
+        namespaces:
+          from: Same
+
+---
+# Source: gateway-fleet/templates/exposure.yaml
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: tenant-b-cloudflare
+  namespace: edge-tenant-b-cloudflare
+spec:
+  gatewayClassName: cloudflare
+  infrastructure:
+    parametersRef:
+      group: gateway.envoyproxy.io
+      kind: EnvoyProxy
+      name: tenant-b-cloudflare-proxy
+  allowedListeners:
+    namespaces:
+      from: Same
+  listeners:
+    - name: https
+      protocol: HTTPS
+      port: 443
+      hostname: "gateway-health.tenant-b.example.com"
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - group: ""
+            kind: Secret
+            name: tenant-b-cloudflare-health-tls
+      allowedRoutes:
+        kinds:
+        - group: gateway.networking.k8s.io
+          kind: HTTPRoute
+        namespaces:
+          from: Same
+
+---
+# Source: gateway-fleet/templates/class.yaml
+apiVersion: gateway.networking.k8s.io/v1
+kind: GatewayClass
+metadata:
+  name: cloudflare
+spec:
+  controllerName: gateway.envoyproxy.io/gatewayclass-controller
+
+---
+# Source: gateway-fleet/templates/class.yaml
+apiVersion: gateway.networking.k8s.io/v1
+kind: GatewayClass
+metadata:
+  name: nlb
+spec:
+  controllerName: gateway.envoyproxy.io/gatewayclass-controller
+
+---
+# Source: gateway-fleet/templates/exposure.yaml
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: staff-nlb-health
+  namespace: edge-staff-nlb
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: staff-nlb
+      namespace: edge-staff-nlb
+      sectionName: https
+  hostnames:
+    - "gateway-health.staff.internal.example"
+  rules:
+    - matches:
+        - path:
+            type: Exact
+            value: /healthz
+      filters:
+        - type: ExtensionRef
+          extensionRef:
+            group: gateway.envoyproxy.io
+            kind: HTTPRouteFilter
+            name: staff-nlb-health
+
+---
+# Source: gateway-fleet/templates/exposure.yaml
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: tenant-a-cloudflare-health
+  namespace: edge-tenant-a-cloudflare
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: tenant-a-cloudflare
+      namespace: edge-tenant-a-cloudflare
+      sectionName: https
+  hostnames:
+    - "gateway-health.tenant-a.example.com"
+  rules:
+    - matches:
+        - path:
+            type: Exact
+            value: /healthz
+      filters:
+        - type: ExtensionRef
+          extensionRef:
+            group: gateway.envoyproxy.io
+            kind: HTTPRouteFilter
+            name: tenant-a-cloudflare-health
+
+---
+# Source: gateway-fleet/templates/exposure.yaml
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: tenant-b-cloudflare-health
+  namespace: edge-tenant-b-cloudflare
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: tenant-b-cloudflare
+      namespace: edge-tenant-b-cloudflare
+      sectionName: https
+  hostnames:
+    - "gateway-health.tenant-b.example.com"
+  rules:
+    - matches:
+        - path:
+            type: Exact
+            value: /healthz
+      filters:
+        - type: ExtensionRef
+          extensionRef:
+            group: gateway.envoyproxy.io
+            kind: HTTPRouteFilter
+            name: tenant-b-cloudflare-health
+
+---
+# Source: gateway-fleet/templates/exposure.yaml
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: HTTPRouteFilter
+metadata:
+  name: staff-nlb-health
+  namespace: edge-staff-nlb
+spec:
+  directResponse:
+    statusCode: 200
+    contentType: text/plain
+    body:
+      type: Inline
+      inline: "ok"
+
+---
+# Source: gateway-fleet/templates/exposure.yaml
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: HTTPRouteFilter
+metadata:
+  name: tenant-a-cloudflare-health
+  namespace: edge-tenant-a-cloudflare
+spec:
+  directResponse:
+    statusCode: 200
+    contentType: text/plain
+    body:
+      type: Inline
+      inline: "ok"
+
+---
+# Source: gateway-fleet/templates/exposure.yaml
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: HTTPRouteFilter
+metadata:
+  name: tenant-b-cloudflare-health
+  namespace: edge-tenant-b-cloudflare
+spec:
+  directResponse:
+    statusCode: 200
+    contentType: text/plain
+    body:
+      type: Inline
+      inline: "ok"

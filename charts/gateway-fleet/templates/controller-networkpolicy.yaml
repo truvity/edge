@@ -31,11 +31,30 @@ spec:
     - Ingress
     - Egress
   ingress:
+    {{- /* Those of this namespace, and those of every exposure that has a
+           namespace of its own. */}}
     # xDS from the proxies.
     - from:
         - podSelector:
             matchLabels:
               {{- toYaml $np.xds.proxyPodLabels | nindent 14 }}
+        {{- $proxyNamespaces := dict }}
+        {{- range $name, $spec := $.Values.exposures }}
+        {{- $raw := $spec | default dict }}
+        {{- $c := include "gateway.class.resolve" (dict "root" $ "name" $raw.class "spec" (get $.Values.classes ($raw.class | default "")) ) | fromYaml }}
+        {{- $e := include "gateway.exposure.resolve" (dict "root" $ "name" $name "spec" $raw "class" $c) | fromYaml }}
+        {{- if and $e.enabled $c.enabled (ne $e.namespace $np.namespace) }}
+        {{- $_ := set $proxyNamespaces $e.namespace true }}
+        {{- end }}
+        {{- end }}
+        {{- range $ns := keys $proxyNamespaces | sortAlpha }}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $ns }}
+          podSelector:
+            matchLabels:
+              {{- toYaml $np.xds.proxyPodLabels | nindent 14 }}
+        {{- end }}
       ports:
         - port: {{ $np.xds.port }}
           protocol: TCP

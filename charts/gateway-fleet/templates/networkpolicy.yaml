@@ -45,9 +45,21 @@ spec:
     # xDS to the controller. Structural: without it the proxies never receive
     # a configuration and the exposure is dark, whatever else is allowed.
     - to:
+        {{- /* A peer with no namespace selector means the policy's own
+               namespace. An exposure in a namespace of its own names the
+               controller's (controllerNetworkPolicy.namespace). */}}
+        {{- if ne $e.namespace $.Values.controllerNetworkPolicy.namespace }}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $.Values.controllerNetworkPolicy.namespace }}
+          podSelector:
+            matchLabels:
+              {{- toYaml $np.xds.controllerPodLabels | nindent 14 }}
+        {{- else }}
         - podSelector:
             matchLabels:
               {{- toYaml $np.xds.controllerPodLabels | nindent 14 }}
+        {{- end }}
       ports:
         - port: {{ $np.xds.port }}
           protocol: TCP

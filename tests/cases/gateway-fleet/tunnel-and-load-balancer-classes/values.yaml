@@ -1,0 +1,118 @@
+# Two split classes, named for how a request arrives: `cloudflare` for the
+# Gateways a tunnel reaches (ClusterIP, never a load balancer) and `nlb` for
+# the Gateways an internal load balancer reaches. Each Gateway is one owner's:
+# it has its own namespace, its own proxy and its own Service, so no two
+# owners share an address, a certificate or a failure domain.
+#
+# The Service of a proxy is named `envoy-<gateway>` here, never
+# `gateway-<class>`: a Service named for the class is the name a class-level
+# proxy would take.
+classes:
+  cloudflare:
+    namespace: envoy-gateway-system
+    mergeGateways: false
+  nlb:
+    namespace: envoy-gateway-system
+    mergeGateways: false
+
+exposures:
+  tenant-a-cloudflare:
+    class: cloudflare
+    namespace: edge-tenant-a-cloudflare
+    health:
+      hostname: gateway-health.tenant-a.example.com
+      directResponse:
+        enabled: true
+      certificate:
+        issuerRef:
+          name: example-origin-ca
+    allowedListeners:
+      namespaces:
+        from: Same
+    clientTrafficPolicy:
+      enabled: true
+    proxy:
+      service:
+        name: envoy-tenant-a-cloudflare
+        type: ClusterIP
+    networkPolicy:
+      enabled: true
+      ingress:
+        - from:
+            - podSelector:
+                matchLabels:
+                  app.kubernetes.io/name: tunnel-client
+          ports:
+            - port: 10443
+              protocol: TCP
+
+  tenant-b-cloudflare:
+    class: cloudflare
+    namespace: edge-tenant-b-cloudflare
+    health:
+      hostname: gateway-health.tenant-b.example.com
+      directResponse:
+        enabled: true
+      certificate:
+        issuerRef:
+          name: example-origin-ca
+    clientTrafficPolicy:
+      enabled: true
+    proxy:
+      service:
+        name: envoy-tenant-b-cloudflare
+        type: ClusterIP
+    networkPolicy:
+      enabled: true
+      ingress:
+        - from:
+            - podSelector:
+                matchLabels:
+                  app.kubernetes.io/name: tunnel-client
+          ports:
+            - port: 10443
+              protocol: TCP
+
+  staff-nlb:
+    class: nlb
+    namespace: edge-staff-nlb
+    health:
+      hostname: gateway-health.staff.internal.example
+      directResponse:
+        enabled: true
+      certificate:
+        issuerRef:
+          name: example-private-ca
+    clientTrafficPolicy:
+      enabled: true
+    proxy:
+      service:
+        name: envoy-staff-nlb
+        type: LoadBalancer
+        loadBalancerClass: example.com/network-load-balancer
+        loadBalancerSourceRanges:
+          - 10.0.0.0/14
+        annotations:
+          example.com/load-balancer-scheme: internal
+    networkPolicy:
+      enabled: true
+      ingress:
+        - from:
+            - ipBlock:
+                cidr: 10.0.0.0/14
+          ports:
+            - port: 10443
+              protocol: TCP
+
+# The controller's policy admits xDS from the proxies of each of the three
+# namespaces above.
+controllerNetworkPolicy:
+  enabled: true
+  apiServer:
+    cidrs:
+      - 10.0.0.1/32
+  dns:
+    to:
+      - namespaceSelector:
+          matchLabels:
+            kubernetes.io/metadata.name: kube-system

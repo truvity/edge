@@ -165,7 +165,7 @@ VictoriaMetrics operator's conversion should not have to.
 | `networkPolicy.enabled` | `false` | |
 | `networkPolicy.name` | `envoy-<exposure>` | |
 | `networkPolicy.ingress`, `.egress` | `[]` | the rules are the estate's |
-| `networkPolicy.xds.enabled` | `true` | the egress to the controller's xDS port; structural, because without it the proxies never get a configuration |
+| `networkPolicy.xds.enabled` | `true` | the egress to the controller's xDS port; structural, because without it the proxies never get a configuration. When the exposure's `namespace` is not `controllerNetworkPolicy.namespace`, the rule selects the controller in that namespace, and the controller's policy admits this exposure's proxies |
 | `networkPolicy.xds.controllerPodLabels` | `control-plane: envoy-gateway` | |
 | `networkPolicy.xds.port` | `18000` | |
 
