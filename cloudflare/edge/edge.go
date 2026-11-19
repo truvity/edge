@@ -41,7 +41,8 @@ const (
 	// root (charts/cloudflared). The remote tunnel config names it, so the
 	// mount must exist before a path that uses it ships.
 	DefaultCAPoolPath = "/etc/cloudflared/certs/ca.pem"
-	// DefaultOriginPort is the HTTPS port of an origin service.
+	// DefaultOriginPort is the HTTPS port of an origin service: what
+	// Origin.Port means when it is zero.
 	DefaultOriginPort = 443
 )
 
@@ -67,6 +68,11 @@ type (
 	Origin struct {
 		Service   string
 		Namespace string
+		// Port is the HTTPS port of Service that every ingress rule dials.
+		// Zero is DefaultOriginPort. Set it when the tunnel's hosts are
+		// served by a listener on another port of the same Service; the
+		// rule's hostname stays the origin SNI.
+		Port int
 	}
 
 	// TokenSink stores one tunnel's token where its cluster reads it. The
@@ -99,6 +105,10 @@ type (
 func Deploy(ctx *pulumi.Context, args Args) error {
 	if args.Sink == nil {
 		return fmt.Errorf("edge: a TokenSink is required: where a tunnel token lives is the caller's decision")
+	}
+
+	if err := args.Origin.check(); err != nil {
+		return err
 	}
 
 	logger := args.Logger
@@ -193,6 +203,10 @@ func DeployTunnel(
 		return fmt.Errorf("edge: a TokenSink is required: where a tunnel token lives is the caller's decision")
 	}
 
+	if err := args.Origin.check(); err != nil {
+		return err
+	}
+
 	logger := args.Logger
 	if logger == nil {
 		logger = slog.New(slog.DiscardHandler)
@@ -229,7 +243,9 @@ func newAccount(ctx *pulumi.Context, logger *slog.Logger, args Args, a Account) 
 
 // TunnelArgs maps one tunnel whose hosts all lie in one zone onto the
 // library's Args: pure translation, no resources. For a tunnel whose hosts
-// lie in several zones (Tunnel.Zones), use TunnelArgsInZones.
+// lie in several zones (Tunnel.Zones), use TunnelArgsInZones. It returns no
+// error, so it writes Origin.Port as given: Deploy, DeployTunnel and
+// TunnelArgsInZones refuse a port that is not a TCP port.
 func TunnelArgs(args Args, accountID, zoneID string, t Tunnel) tunnel.Args {
 	return tunnelArgs(args, accountID, &tunnel.DNS{ZoneID: zoneID, Names: t.DNSNames()}, t)
 }
@@ -240,6 +256,10 @@ func TunnelArgs(args Args, accountID, zoneID string, t Tunnel) tunnel.Args {
 // one in several gets tunnel.DNS.Zones, from which cloudflare/tunnel picks each
 // host's zone by longest suffix. A zone with no id is an error.
 func TunnelArgsInZones(args Args, accountID string, zoneIDs map[string]string, t Tunnel) (tunnel.Args, error) {
+	if err := args.Origin.check(); err != nil {
+		return tunnel.Args{}, err
+	}
+
 	zones := tunnelZones(t)
 
 	if len(zones) == 1 {
@@ -263,6 +283,25 @@ func TunnelArgsInZones(args Args, accountID string, zoneIDs map[string]string, t
 	}
 
 	return tunnelArgs(args, accountID, dns, t), nil
+}
+
+// port is the port the ingress rules dial: Port, or DefaultOriginPort when
+// it is zero.
+func (o Origin) port() int {
+	if o.Port == 0 {
+		return DefaultOriginPort
+	}
+
+	return o.Port
+}
+
+// check refuses a Port that is not a TCP port. Zero is the default.
+func (o Origin) check() error {
+	if o.Port < 0 || o.Port > 65535 {
+		return fmt.Errorf("edge: origin port %d is not a TCP port (1 to 65535, or 0 for the default %d)", o.Port, DefaultOriginPort)
+	}
+
+	return nil
 }
 
 // tunnelZones is every zone t's hosts lie in: Zones, or Zone alone when
@@ -319,7 +358,7 @@ func tunnelArgs(args Args, accountID string, dns *tunnel.DNS, t Tunnel) tunnel.A
 		caPool = DefaultCAPoolPath
 	}
 
-	origin := fmt.Sprintf("https://%s.%s.svc.%s:%d", args.Origin.Service, args.Origin.Namespace, dnsDomain, DefaultOriginPort)
+	origin := fmt.Sprintf("https://%s.%s.svc.%s:%d", args.Origin.Service, args.Origin.Namespace, dnsDomain, args.Origin.port())
 
 	ingress := make([]tunnel.Ingress, 0, len(t.Hosts))
 	for _, host := range t.Hosts {

@@ -92,6 +92,31 @@ func TestTunnelArgsOriginAndCAPool(t *testing.T) {
 	assert.Equal(t, "https://gateway-internal.gateways.svc.cluster.alpha:443", got.Ingress[0].Service)
 }
 
+func TestTunnelArgsOriginPort(t *testing.T) {
+	args := baseArgs(nil)
+	args.Origin.Port = 8443
+
+	got := TunnelArgs(args, "a1", "z1", args.Tunnels[0])
+	require.Len(t, got.Ingress, 1)
+	assert.Equal(t, "https://gateway-internal.gateways.svc.cluster.example:8443", got.Ingress[0].Service)
+	assert.Equal(t, "a.example.test", got.Ingress[0].OriginServerName, "the port does not change the origin SNI")
+
+	inZones, err := TunnelArgsInZones(args, "a1", map[string]string{args.Tunnels[0].Zone: "z1"}, args.Tunnels[0])
+	require.NoError(t, err)
+	assert.Equal(t, got, inZones)
+
+	// Zero is the default, so a caller that sets no port renders as before.
+	args.Origin.Port = 0
+	assert.Equal(t, TunnelArgs(baseArgs(nil), "a1", "z1", args.Tunnels[0]), TunnelArgs(args, "a1", "z1", args.Tunnels[0]))
+
+	for _, bad := range []int{-1, 65536} {
+		args.Origin.Port = bad
+
+		_, err := TunnelArgsInZones(args, "a1", map[string]string{args.Tunnels[0].Zone: "z1"}, args.Tunnels[0])
+		require.ErrorContains(t, err, "is not a TCP port")
+	}
+}
+
 func TestDeployAppliesTheOptionHooks(t *testing.T) {
 	args := baseArgs((&sunk{}).sink)
 

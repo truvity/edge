@@ -5,6 +5,12 @@ heading here is a patch cut automatically for dependency bumps alone; its
 GitHub Release lists them. The chart and the Go module are released
 together at every version.
 
+## v4.11.0
+
+### Added
+
+- **`cloudflare/edge`, `cloudflare/services`: `Origin.Port`.** The HTTPS port of the origin Service that every ingress rule of a tunnel dials. Zero is `edge.DefaultOriginPort` (443), so a caller that does not set it gets the same ingress rules as before. Set it when a tunnel's hosts are served by a listener on another port of the same Service; the rule's hostname stays the origin SNI. `Deploy`, `DeployTunnel` and `TunnelArgsInZones` refuse a port outside 1 to 65535. In `cloudflare/services`, an `Origin` with a `Port` and no `Service` or `Namespace` keeps the registry's `fleets.internal` service.
+
 ## v4.10.1
 
 ### Changed
