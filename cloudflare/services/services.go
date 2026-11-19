@@ -47,6 +47,9 @@ type (
 	Origin struct {
 		Service   string
 		Namespace string
+		// Port is the HTTPS port of Service that every ingress rule dials.
+		// Zero is edge.DefaultOriginPort.
+		Port int
 	}
 
 	// TokenSink stores one tunnel's token where its cluster reads it. The
@@ -64,8 +67,9 @@ type (
 		// the company is deployed whether or not its cluster is listed; an
 		// unlisted cluster has the default "cluster.<name>".
 		Clusters []Cluster
-		// Origin is the service the ingress rules route to. Empty is the
-		// registry's fleets.internal.
+		// Origin is the service the ingress rules route to. With no Service
+		// and no Namespace, both are the registry's fleets.internal, and Port
+		// is kept.
 		Origin Origin
 		// CAPoolPath defaults to edge.DefaultCAPoolPath.
 		CAPoolPath string
@@ -148,13 +152,13 @@ func Deploy(ctx *pulumi.Context, args Args) error {
 	}
 
 	origin := args.Origin
-	if origin == (Origin{}) {
-		origin = Origin{Service: cfg.Fleets.Internal.Service, Namespace: cfg.Fleets.Internal.Namespace}
+	if origin.Service == "" && origin.Namespace == "" {
+		origin.Service, origin.Namespace = cfg.Fleets.Internal.Service, cfg.Fleets.Internal.Namespace
 	}
 
 	tunnels := map[string]Tunnel{}
 	edgeArgs := edge.Args{
-		Origin:     edge.Origin{Service: origin.Service, Namespace: origin.Namespace},
+		Origin:     edge.Origin{Service: origin.Service, Namespace: origin.Namespace, Port: origin.Port},
 		CAPoolPath: args.CAPoolPath,
 		Logger:     logger,
 		Sink: func(ctx *pulumi.Context, t edge.Tunnel, token pulumi.StringOutput) error {

@@ -122,6 +122,21 @@ func TestClustersAndOrigin(t *testing.T) {
 	r, err = run(t, a)
 	require.NoError(t, err)
 	assert.Contains(t, fmt.Sprint(r.ByKey()[ingress+"ingress-devel"].Inputs), "https://other.ns.svc.k8s.internal:443")
+
+	// A port alone keeps the registry's service.
+	a.Origin = services.Origin{Port: 8443}
+	r, err = run(t, a)
+	require.NoError(t, err)
+	assert.Contains(t, fmt.Sprint(r.ByKey()[ingress+"ingress-devel"].Inputs), "https://gateway-internal.envoy-gateway-system.svc.k8s.internal:8443")
+
+	a.Origin = services.Origin{Service: "other", Namespace: "ns", Port: 8443}
+	r, err = run(t, a)
+	require.NoError(t, err)
+	assert.Contains(t, fmt.Sprint(r.ByKey()[ingress+"ingress-devel"].Inputs), "https://other.ns.svc.k8s.internal:8443")
+
+	a.Origin = services.Origin{Port: 70000}
+	_, err = run(t, a)
+	require.ErrorContains(t, err, "is not a TCP port")
 }
 
 func TestTunnelOptionsAndAccountOptions(t *testing.T) {
