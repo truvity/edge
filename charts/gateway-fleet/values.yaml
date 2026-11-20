@@ -395,7 +395,12 @@ metrics:
         - envoy_cluster_upstream_rq_(xx|total|time_(bucket|sum|count))
         - envoy_cluster_membership_(total|healthy|excluded|degraded)
         - envoy_cluster_upstream_cx_(total|active|tx_bytes_total|rx_bytes_total)
-        - envoy_cluster_outlier_detection_ejections_active
+        # Failures: connections that could not be made, retries, and hosts
+        # ejected by outlier detection. Without these a backend that refuses
+        # connections is invisible, only its 5xx are.
+        - envoy_cluster_upstream_cx_connect_fail
+        - envoy_cluster_upstream_rq_retry(_success|_overflow)?
+        - envoy_cluster_outlier_detection_ejections_(active|enforced_total)
         - envoy_http_downstream_rq_(total|xx|time_(bucket|sum|count))
         - envoy_http_downstream_cx_(total|tx_bytes_total|rx_bytes_total)
         - envoy_listener_(downstream_cx_active|ssl_certificate_expiration_unix_time_seconds)
