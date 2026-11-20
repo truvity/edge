@@ -5,6 +5,12 @@ heading here is a patch cut automatically for dependency bumps alone; its
 GitHub Release lists them. The chart and the Go module are released
 together at every version.
 
+## v4.12.0
+
+### Changed
+
+- **`gateway-fleet`: the proxy metric keep-list also keeps the families that show backend failures.** `metrics.podMonitor.proxy.keep` now includes `envoy_cluster_upstream_cx_connect_fail`, `envoy_cluster_upstream_rq_retry`, `envoy_cluster_upstream_rq_retry_success`, `envoy_cluster_upstream_rq_retry_overflow` and `envoy_cluster_outlier_detection_ejections_enforced_total`. Connections the proxy could not make to a backend, retries and ejections by outlier detection were dropped at scrape time, so a backend that refused connections showed up nowhere. Each is a counter per `envoy_cluster_name`, so a release adds five series per routed backend. A release that sets `keep` replaces the list and is unchanged: add the five names to it to get them.
+
 ## v4.11.1
 
 ### Fixed

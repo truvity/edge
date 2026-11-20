@@ -194,7 +194,7 @@ spec:
       interval: 30s
       metricRelabelings:
         - action: keep
-          regex: envoy_cluster_upstream_rq_(xx|total|time_(bucket|sum|count))|envoy_cluster_membership_(total|healthy|excluded|degraded)|envoy_cluster_upstream_cx_(total|active|tx_bytes_total|rx_bytes_total)|envoy_cluster_outlier_detection_ejections_active|envoy_http_downstream_rq_(total|xx|time_(bucket|sum|count))|envoy_http_downstream_cx_(total|tx_bytes_total|rx_bytes_total)|envoy_listener_(downstream_cx_active|ssl_certificate_expiration_unix_time_seconds)|envoy_tcp_downstream_cx_(total|tx_bytes_total|rx_bytes_total)|envoy_tls_certificate_.*|envoy_server_(uptime|memory_heap_size|memory_allocated|live)
+          regex: envoy_cluster_upstream_rq_(xx|total|time_(bucket|sum|count))|envoy_cluster_membership_(total|healthy|excluded|degraded)|envoy_cluster_upstream_cx_(total|active|tx_bytes_total|rx_bytes_total)|envoy_cluster_upstream_cx_connect_fail|envoy_cluster_upstream_rq_retry(_success|_overflow)?|envoy_cluster_outlier_detection_ejections_(active|enforced_total)|envoy_http_downstream_rq_(total|xx|time_(bucket|sum|count))|envoy_http_downstream_cx_(total|tx_bytes_total|rx_bytes_total)|envoy_listener_(downstream_cx_active|ssl_certificate_expiration_unix_time_seconds)|envoy_tcp_downstream_cx_(total|tx_bytes_total|rx_bytes_total)|envoy_tls_certificate_.*|envoy_server_(uptime|memory_heap_size|memory_allocated|live)
           sourceLabels:
           - __name__
         - action: labeldrop
@@ -223,7 +223,7 @@ spec:
       interval: 30s
       metricRelabelings:
         - action: keep
-          regex: envoy_cluster_upstream_rq_(xx|total|time_(bucket|sum|count))|envoy_cluster_membership_(total|healthy|excluded|degraded)|envoy_cluster_upstream_cx_(total|active|tx_bytes_total|rx_bytes_total)|envoy_cluster_outlier_detection_ejections_active|envoy_http_downstream_rq_(total|xx|time_(bucket|sum|count))|envoy_http_downstream_cx_(total|tx_bytes_total|rx_bytes_total)|envoy_listener_(downstream_cx_active|ssl_certificate_expiration_unix_time_seconds)|envoy_tcp_downstream_cx_(total|tx_bytes_total|rx_bytes_total)|envoy_tls_certificate_.*|envoy_server_(uptime|memory_heap_size|memory_allocated|live)
+          regex: envoy_cluster_upstream_rq_(xx|total|time_(bucket|sum|count))|envoy_cluster_membership_(total|healthy|excluded|degraded)|envoy_cluster_upstream_cx_(total|active|tx_bytes_total|rx_bytes_total)|envoy_cluster_upstream_cx_connect_fail|envoy_cluster_upstream_rq_retry(_success|_overflow)?|envoy_cluster_outlier_detection_ejections_(active|enforced_total)|envoy_http_downstream_rq_(total|xx|time_(bucket|sum|count))|envoy_http_downstream_cx_(total|tx_bytes_total|rx_bytes_total)|envoy_listener_(downstream_cx_active|ssl_certificate_expiration_unix_time_seconds)|envoy_tcp_downstream_cx_(total|tx_bytes_total|rx_bytes_total)|envoy_tls_certificate_.*|envoy_server_(uptime|memory_heap_size|memory_allocated|live)
           sourceLabels:
           - __name__
         - action: labeldrop
