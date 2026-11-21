@@ -56,7 +56,12 @@ type ExecuteParams struct {
 type RedirectParams struct {
 	// TargetURL is the Rules-language expression the redirect targets, for
 	// example concat("https://example.com", http.request.uri.path).
+	// Exclusive with TargetValue.
 	TargetURL string
+	// TargetValue is a static URL the redirect targets, for example
+	// https://example.com/landing: every request the rule matches goes to
+	// exactly it. Exclusive with TargetURL.
+	TargetValue string
 	// StatusCode is the redirect status: 301, 302, 307 or 308.
 	StatusCode int
 	// PreserveQueryString keeps the request's query string.

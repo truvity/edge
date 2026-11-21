@@ -62,8 +62,8 @@ zones:
     ssl_mode_rule_refs: {<host>: <32 hex>}
     config_rules_import_id: <32 hex>
     origin_cnames: {<host>: "" | d-<id>.execute-api.<region>.amazonaws.com}
-    records: [{name, type: A | AAAA | CNAME | NS, content, proxied, ttl, comment, waf: false, waf_reason}]
-    redirects: [{ref, from, to, status: 301, preserve_query_string: true, disabled}]
+    records: [{name, type: A | AAAA | CNAME | NS | TXT, content, proxied, ttl, comment, waf: false, waf_reason}]   # TXT content unquoted
+    redirects: [{ref, from, to, status: 301, preserve_query_string: true, preserve_path: true, disabled}]
     redirect_rules_import_id: <32 hex>     # adopt an existing Single Redirects entry point
     security_txt: {contact: [mailto: | https:], expires: <RFC 3339>, preferred_languages}
 fleets:
@@ -322,9 +322,10 @@ zone already has (hand-made, imported, or a tunnel's CNAME) is left alone
 unless a row names it, and naming a row does **not** adopt an existing
 Cloudflare record: import the existing record by its Cloudflare id onto the
 zone component's child name before the first apply. The child names are
-`record-<zone>-<host-slug>-cname` for a CNAME and
-`record-<zone>-<host-slug>-<type>-<content-slug>` for A, AAAA and NS
-(`zone.RecordName`). The A/AAAA/CNAME names are unchanged.
+`record-<zone>-<host-slug>-cname` for a CNAME,
+`record-<zone>-<host-slug>-<type>-<content-slug>` for A, AAAA and NS, and
+`record-<zone>-<host-slug>-txt-<content-hash>` for TXT (`zone.RecordName`).
+The A/AAAA/CNAME names are unchanged.
 
 `NS` is a child-zone delegation. Its content is one lower-case nameserver
 hostname without a trailing dot; several rows with the same owner are one NS
@@ -353,6 +354,36 @@ to adopt an existing record, import `cloudflare:index/dnsRecord:DnsRecord` as
 that zone component child (with the zone component as its parent) and the
 provider id `<zone_id>/<dns_record_id>`.
 
+### TXT records
+
+`TXT` publishes text: an SPF policy, a DMARC policy, a verification token.
+Write `content` as the text **without** surrounding quotes; the zone sends it
+to Cloudflare in double quotes, which is how Cloudflare's API stores TXT
+content and returns it (and how a record imported from a zone file already
+looks), so a preview after the apply shows no diff. The text is one DNS
+character-string: 1 to 255 printable ASCII characters, with no `"` and no
+`\`. Longer text (a 2048-bit DKIM key) is refused rather than split.
+
+A TXT record is DNS only: `proxied: true`, `waf` and `waf_reason` are refused.
+`ttl` is 0 (automatic) or 60 to 86400. One name may carry several TXT
+records, one row each; an exact repeat (same name and text) is refused. A TXT
+may share its name with A and AAAA records (the apex), but not with a CNAME,
+an NS delegation, or a name a tunnel writes its CNAME for.
+
+```yaml
+zones:
+  example.com:
+    records:
+      - {name: example.com, type: TXT, content: "v=spf1 -all"}
+      - {name: _dmarc.example.com, type: TXT, content: "v=DMARC1; p=reject; sp=none;"}
+```
+
+Each row is one resource named by the first 8 hex digits of the SHA-256 of
+its text: `record-<zone>-example-com-txt-f90139dd` and
+`record-<zone>-_dmarc-example-com-txt-f6247928`. Reordering the rows does not
+rename them; changing the text does (the old record is deleted and the new
+one created).
+
 ## Canonical-host Single Redirects
 
 `redirects` owns the zone's whole `http_request_dynamic_redirect` phase (the
@@ -362,6 +393,21 @@ HTTP and HTTPS and every path, and answers with `to` plus the request's path;
 HTTPS origin only (`https://example.com`, no path, port, query or fragment),
 because the request path is appended. `status` is 301 (default), 302, 307 or
 308. `ref` is stable and unique in the phase.
+
+`preserve_path: false` sends **every** path of the source to exactly `to`, a
+fixed URL that may carry a path of its own (`https://example.com/landing`, or
+`https://example.com/` for the home page): no port, query, fragment or
+trailing `*`. The rule's target is then the static URL (`targetUrl.value`)
+instead of an expression with the request's path. `preserve_query_string`
+keeps its meaning. Absent (or `true`) is the behaviour above, and a `to` with
+a path is refused there with a pointer to `preserve_path: false`.
+
+```yaml
+zones:
+  example.com:
+    redirects:
+      - {ref: regional_to_page, from: regional.example.com, to: https://example.net/regional, preserve_path: false}
+```
 
 ```yaml
 zones:
@@ -388,7 +434,8 @@ The rendered Cloudflare rule is exactly:
 | Preserve query string | `true` |
 
 Validation refuses a source outside the zone, a wildcard, an HTTPS
-destination with a path/port/query/fragment, a repeated ref or source,
+destination with a port/query/fragment (or a path, unless
+`preserve_path: false`), a repeated ref or source,
 an unsupported status, and a loop visible between the declared redirects (a
 chain ending outside the declarations is allowed). No regex and no WAF
 feature is involved.

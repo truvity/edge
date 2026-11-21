@@ -114,8 +114,9 @@ func TrustedClients(t *zonespec.TrustedClients) (Contribution, error) {
 // Redirects is the zone's canonical-host Single Redirects: one rule per
 // declared source host in the http_request_dynamic_redirect phase. Each
 // rule matches the exact host on HTTP and HTTPS and every path, and answers
-// with the HTTPS destination plus the request's path; the query string is
-// kept unless PreserveQueryString is false. Entries are sorted by source
+// with the HTTPS destination plus the request's path (a target expression),
+// or, with PreservePath false, with exactly the destination (a static target
+// URL); the query string is kept unless PreserveQueryString is false. Entries are sorted by source
 // host, then ref, so the plan never depends on authoring order. An unmanaged
 // block (nil or no entries) is a contribution with no rules.
 func Redirects(r *zonespec.Redirects) (Contribution, error) {
@@ -150,17 +151,20 @@ func Redirects(r *zonespec.Redirects) (Contribution, error) {
 			preserve = *e.PreserveQueryString
 		}
 
+		params := &RedirectParams{StatusCode: status, PreserveQueryString: preserve}
+		if e.PreservesPath() {
+			params.TargetURL = fmt.Sprintf("concat(%q, http.request.uri.path)", e.To)
+		} else {
+			params.TargetValue = e.To
+		}
+
 		c.Rules = append(c.Rules, Rule{
 			Ref:         e.Ref,
 			Description: fmt.Sprintf("%s: redirect to %s", e.From, e.To),
 			Action:      ActionRedirect,
 			Expression:  fmt.Sprintf(`http.host eq "%s"`, e.From),
 			Disabled:    e.Disabled,
-			Params: Params{Redirect: &RedirectParams{
-				TargetURL:           fmt.Sprintf("concat(%q, http.request.uri.path)", e.To),
-				StatusCode:          status,
-				PreserveQueryString: preserve,
-			}},
+			Params:      Params{Redirect: params},
 		})
 	}
 

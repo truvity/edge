@@ -466,15 +466,19 @@ otherwise refuse a second entry point ruleset for the phase.
 | `Zone` | `zone` | the zone's lower-case domain (`example.com`); required when entries are set |
 | `Entries` | `entries` | the records, any order |
 | `Entries[].Name` | `name` | lower-case hostname, the zone itself or a name inside it; a leading `*.` makes it a wildcard at any depth (`*.api.example.com`). An NS owner is an exact name below the zone: no wildcard, no apex |
-| `Entries[].Type` | `type` | `A`, `AAAA`, `CNAME` or `NS`. NS delegates a child zone and is DNS only |
-| `Entries[].Content` | `content` | IPv4 (`A`), IPv6 (`AAAA`), or a lower-case target hostname without a trailing dot (`CNAME`, and one nameserver hostname per `NS`) |
-| `Entries[].Proxied` | `proxied` | serve the name through Cloudflare's edge (orange cloud); false answers DNS only. NS is always false |
+| `Entries[].Type` | `type` | `A`, `AAAA`, `CNAME`, `NS` or `TXT`. NS delegates a child zone; NS and TXT are DNS only |
+| `Entries[].Content` | `content` | IPv4 (`A`), IPv6 (`AAAA`), a lower-case target hostname without a trailing dot (`CNAME`, and one nameserver hostname per `NS`), or the text of a `TXT` without surrounding quotes: 1 to 255 printable ASCII characters, no `"` or `\` |
+| `Entries[].Proxied` | `proxied` | serve the name through Cloudflare's edge (orange cloud); false answers DNS only. NS and TXT are always false |
 | `Entries[].TTL` | `ttl` | DNS-only TTL, 60 to 86400 seconds; 0 is automatic. A proxied record must leave it at 0. An NS record needs an explicit TTL, and one owner's targets share it |
 | `Entries[].Comment` | `comment` | shown beside the record in the dashboard |
 
 One `cloudflare.DnsRecord` per entry, named `record-<name>-<host-slug>-cname`
-for a CNAME and `record-<name>-<host-slug>-<type>-<content-slug>` for an A,
-AAAA or NS (`zone.RecordName`). A record that already exists with the same name and
+for a CNAME, `record-<name>-<host-slug>-<type>-<content-slug>` for an A,
+AAAA or NS, and `record-<name>-<host-slug>-txt-<content-hash>` for a TXT, the
+hash being the first 8 hex digits of the SHA-256 of the declared text
+(`zone.RecordName`). A TXT record's content is sent in double quotes
+(`zone.RecordContent`): Cloudflare's API stores and returns TXT content as
+quoted character-strings, so the provider reads back what it sent. A record that already exists with the same name and
 type (an import, a hand edit) is not adopted: delete it, or import it onto
 that name, before the first apply. The provider import id is
 `<zone_id>/<dns_record_id>` (`pulumi import
@@ -488,6 +492,12 @@ tunnel host exactly at or anywhere below an NS owner is refused: the child
 zone cut would hide the parent tunnel record. Child-zone contents are not
 created or managed here.
 
+A TXT record never joins the managed WAF either: `proxied` and `waf` are
+refused on it. One name may carry several TXT records (an exact repeat is
+refused), beside A and AAAA records, but not beside a CNAME or at an NS
+owner. In the config file, a TXT on a name a tunnel writes its CNAME for is
+refused too.
+
 `Redirects`:
 
 | Field | YAML key | Meaning |
@@ -496,7 +506,8 @@ created or managed here.
 | `Entries` | `entries` | the redirects, any order; rendered sorted by `From`, then `Ref` |
 | `Entries[].Ref` | `ref` | stable rule ref, lowercase, unique in the phase (`www_to_apex`) |
 | `Entries[].From` | `from` | exact lower-case source hostname inside the zone; no wildcard, scheme or path |
-| `Entries[].To` | `to` | HTTPS origin (`https://example.com`) with no path, port, query or fragment; the request path is appended |
+| `Entries[].To` | `to` | HTTPS origin (`https://example.com`) with no path, port, query or fragment; the request path is appended. With `PreservePath` false, one fixed HTTPS URL that may carry a path (`https://example.com/landing`), no port, query, fragment or trailing `*` |
+| `Entries[].PreservePath` | `preservePath` | append the request's path to `To`; nil means true. False sends every path of `From` to exactly `To` |
 | `Entries[].Status` | `status` | 301 (default), 302, 307 or 308 |
 | `Entries[].PreserveQueryString` | `preserveQueryString` | keep the query string; nil means true |
 | `Entries[].Disabled` | `disabled` | keep the rule and its ref, inert: the second rollback stage |
@@ -510,8 +521,10 @@ http.host eq "www.example.com"
 
 and the action parameters `fromValue{targetUrl.expression:
 concat("https://example.com", http.request.uri.path), statusCode: 301,
-preserveQueryString: true}`. It matches HTTP and HTTPS on every path and needs
-no regex or WAF feature. Validation refuses an unsupported source or
+preserveQueryString: true}`. With `PreservePath` false the target is the
+static URL instead, `fromValue{targetUrl.value: "https://example.com/landing",
+...}`, and every path lands on it. It matches HTTP and HTTPS on every path and
+needs no regex or WAF feature. Validation refuses an unsupported source or
 destination, a repeated ref or source, an invalid status, and a loop visible
 between the declared redirects.
 

@@ -44,6 +44,19 @@ func TestValidate(t *testing.T) {
 	require.Error(t, (&zonespec.Args{ZoneID: "z"}).Validate())
 }
 
+func TestDNSOnlyTypes(t *testing.T) {
+	for typ, want := range map[string]bool{"NS": true, "TXT": true, "A": false, "AAAA": false, "CNAME": false} {
+		assert.Equal(t, want, zonespec.DNSOnly(typ), typ)
+	}
+}
+
+func TestPreservesPath(t *testing.T) {
+	yes, no := true, false
+	assert.True(t, (&zonespec.Redirect{}).PreservesPath(), "nil preserves the path")
+	assert.True(t, (&zonespec.Redirect{PreservePath: &yes}).PreservesPath())
+	assert.False(t, (&zonespec.Redirect{PreservePath: &no}).PreservesPath())
+}
+
 func TestExpressions(t *testing.T) {
 	assert.Equal(t, `http.host in {"a.example.com"} or ends_with(http.host, ".example.com")`,
 		zonespec.HostExpression([]string{"a.example.com", "*.example.com"}))

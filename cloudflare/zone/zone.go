@@ -2,7 +2,8 @@
 // actually decides: how Cloudflare talks to the origin, the floor it will
 // negotiate with a browser, whether every proxied hostname gets a
 // certificate without anyone asking for one, the DNS records (including
-// DNS-only child-zone NS delegations), and canonical-host Single Redirects.
+// DNS-only child-zone NS delegations and TXT records), and canonical-host
+// Single Redirects.
 //
 // This is deliberately small. A Cloudflare zone has scores of settings and
 // most are defaults nobody should be managing from a deployment tool; the
@@ -33,6 +34,8 @@
 package zone
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"strings"
 
@@ -265,7 +268,7 @@ func New(ctx *pulumi.Context, name string, args Args, opts ...pulumi.ResourceOpt
 				ZoneId:  zoneID,
 				Name:    pulumi.String(r.Name),
 				Type:    pulumi.String(r.Type),
-				Content: pulumi.String(r.Content),
+				Content: pulumi.String(RecordContent(r)),
 				Proxied: pulumi.Bool(r.Proxied),
 				// 1 = automatic, the only TTL a proxied record takes.
 				Ttl: pulumi.Float64(recordTTL(r)),
@@ -318,16 +321,46 @@ func hstsValue(h *HSTS) pulumi.Map {
 }
 
 // RecordName is the child name of one record: "record-<name>-<host-slug>-cname"
-// for a CNAME (one per name), and "record-<name>-<host-slug>-<type>-<content-slug>"
+// for a CNAME (one per name), "record-<name>-<host-slug>-<type>-<content-slug>"
 // for an A, AAAA or NS (several may share a name; an NS set is one per
-// target). A documented contract, like the other child names.
+// target), and "record-<name>-<host-slug>-txt-<content-hash>" for a TXT,
+// whose text is no name fragment: the first 8 hex digits of the SHA-256 of
+// its content (unquoted, as declared). Several TXT records on one name get
+// one name each, stable under reordering. A documented contract, like the
+// other child names.
 func RecordName(name string, r *Record) string {
 	out := "record-" + name + "-" + recordSlug(r.Name) + "-" + strings.ToLower(r.Type)
-	if r.Type != "CNAME" {
+
+	switch r.Type {
+	case "CNAME":
+		// One per name: the name alone identifies it.
+	case "TXT":
+		sum := sha256.Sum256([]byte(r.Content))
+		out += "-" + hex.EncodeToString(sum[:])[:txtHashDigits]
+	default:
 		out += "-" + recordSlug(r.Content)
 	}
 
 	return out
+}
+
+// txtHashDigits is how many hex digits of a TXT content's SHA-256 name its
+// record. 32 bits for the handful of texts one name carries; a collision
+// would be two children of one name, which Pulumi refuses at preview.
+const txtHashDigits = 8
+
+// RecordContent is the content Cloudflare is given for a record. A TXT
+// record's text is wrapped in double quotes: the API's TXT content is quoted
+// character-strings (RFC 1035), and quoted is how Cloudflare returns it and
+// how an imported zone file stores it, so the provider reads back exactly
+// what it sent and a preview shows no diff. Every other type is sent as
+// declared.
+func RecordContent(r *Record) string {
+	if r.Type == "TXT" {
+		return `"` + r.Content + `"`
+	}
+
+	return r.Content
 }
 
 // recordSlug renders a hostname or address as a resource-name fragment
