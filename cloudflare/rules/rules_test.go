@@ -556,6 +556,34 @@ func TestRedirectsContribution(t *testing.T) {
 	require.ErrorContains(t, err, "HTTPS")
 }
 
+// TestFixedRedirectIsAStaticTarget: with PreservePath false the rule's
+// target is the destination itself, not an expression with the path.
+func TestFixedRedirectIsAStaticTarget(t *testing.T) {
+	fixed := false
+	c, err := rules.Redirects(&zonespec.Redirects{
+		Zone: "example.com",
+		Entries: []zonespec.Redirect{
+			{Ref: "regional_to_page", From: "regional.example.com", To: "https://site.example.net/regional", PreservePath: &fixed},
+			{Ref: "www_to_apex", From: "www.example.com", To: "https://example.com"},
+		},
+	})
+	require.NoError(t, err)
+	require.Len(t, c.Rules, 2)
+
+	r := c.Rules[0].Params.Redirect
+	require.NotNil(t, r)
+	assert.Equal(t, "regional_to_page", c.Rules[0].Ref)
+	assert.Equal(t, `http.host eq "regional.example.com"`, c.Rules[0].Expression)
+	assert.Equal(t, "https://site.example.net/regional", r.TargetValue)
+	assert.Empty(t, r.TargetURL, "a static target carries no expression")
+	assert.Equal(t, 301, r.StatusCode)
+	assert.True(t, r.PreserveQueryString)
+
+	other := c.Rules[1].Params.Redirect
+	assert.Equal(t, `concat("https://example.com", http.request.uri.path)`, other.TargetURL)
+	assert.Empty(t, other.TargetValue, "the default keeps the path")
+}
+
 func TestAssembleKeepsTheDynamicRedirectPhase(t *testing.T) {
 	c, err := rules.Redirects(&zonespec.Redirects{
 		Zone:    "example.com",

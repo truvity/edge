@@ -121,8 +121,9 @@ an adopted ruleset preserves them. A zone that declares an SSL-mode
 contribution or a redirect owns the whole phase, like the others.
 
 The redirect action parameters (`rules.RedirectParams`) map to the provider's
-`fromValue`: `targetUrl.expression`, `statusCode` and
-`preserveQueryString`. The zone component adds one explicit dependency: a
+`fromValue`: `targetUrl.expression` (`TargetURL`) or, for a static target,
+`targetUrl.value` (`TargetValue`, set by a redirect with `PreservePath`
+false), `statusCode` and `preserveQueryString`. The zone component adds one explicit dependency: a
 proxied DNS record whose name is a redirect source waits for the redirect
 ruleset (`pulumi.DependsOn`), which no declaration order can replace.
 

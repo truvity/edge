@@ -265,13 +265,20 @@ func actionParameters(p *cfrules.Params) *cloudflare.RulesetRuleActionParameters
 	case p.Redirect != nil:
 		r := p.Redirect
 
+		// A static target (TargetValue) is the provider's targetUrl.value;
+		// otherwise the target is an expression. Never both.
+		target := cloudflare.RulesetRuleActionParametersFromValueTargetUrlArgs{}
+		if r.TargetValue != "" {
+			target.Value = pulumi.String(r.TargetValue)
+		} else {
+			target.Expression = pulumi.String(r.TargetURL)
+		}
+
 		return &cloudflare.RulesetRuleActionParametersArgs{
 			FromValue: &cloudflare.RulesetRuleActionParametersFromValueArgs{
 				PreserveQueryString: pulumi.Bool(r.PreserveQueryString),
 				StatusCode:          pulumi.Int(r.StatusCode),
-				TargetUrl: cloudflare.RulesetRuleActionParametersFromValueTargetUrlArgs{
-					Expression: pulumi.String(r.TargetURL),
-				},
+				TargetUrl:           target,
 			},
 		}
 	}

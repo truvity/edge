@@ -309,21 +309,28 @@ type (
 		// delegation owner: an exact name below the zone, never the apex
 		// and never a wildcard.
 		Name string `json:"name" yaml:"name"`
-		// Type is A, AAAA, CNAME or NS. NS is DNS-only: it delegates a
-		// child zone and takes no proxy, WAF or certificate.
+		// Type is A, AAAA, CNAME, NS or TXT. NS and TXT are DNS-only: NS
+		// delegates a child zone, TXT publishes text (SPF, DMARC, a
+		// verification token), and neither takes a proxy, WAF or
+		// certificate.
 		Type string `json:"type" yaml:"type"`
-		// Content is the IPv4 address (A), IPv6 address (AAAA), or the
+		// Content is the IPv4 address (A), IPv6 address (AAAA), the
 		// lower-case target hostname without a trailing dot (CNAME and
-		// NS). An NS content is one nameserver hostname; the same owner
-		// may carry several, each its own record.
+		// NS), or the text of a TXT record. An NS content is one
+		// nameserver hostname; the same owner may carry several, each its
+		// own record. A TXT content is the text WITHOUT surrounding
+		// quotes ("v=spf1 -all"): one character-string of 1 to 255
+		// printable ASCII characters, with no double quote and no
+		// backslash. The zone component sends it to Cloudflare quoted.
+		// One name may carry several TXT records, each its own record.
 		Content string `json:"content" yaml:"content"`
 		// Proxied serves the name through Cloudflare's edge (orange
-		// cloud); false answers DNS only. NS is always DNS only.
+		// cloud); false answers DNS only. NS and TXT are always DNS only.
 		Proxied bool `json:"proxied,omitempty" yaml:"proxied,omitempty"`
 		// WAF says whether a proxied record's name is covered by the
 		// zone's derived managed WAF. Nil is on; only false opts the name
 		// out (WAFCovered). Meaningless on a DNS-only record, and refused
-		// on NS.
+		// on NS and TXT.
 		WAF *bool `json:"waf,omitempty" yaml:"waf,omitempty"`
 		// TTL in seconds for a DNS-only record, 60 to 86400; 0 is
 		// Cloudflare's automatic TTL. A proxied record is always
@@ -341,8 +348,9 @@ type (
 	// existing one with Args.ImportRulesets rather than creating a second.
 	//
 	// Each match is exactly one host, on HTTP and HTTPS and every path. The
-	// redirect answers with To plus the request's path and, by default, its
-	// query string. It needs no regex and no WAF feature.
+	// redirect answers with To plus the request's path (or, with
+	// PreservePath false, with exactly To) and, by default, its query
+	// string. It needs no regex and no WAF feature.
 	Redirects struct {
 		// Zone is the zone's domain ("example.com"). Required when Entries
 		// is not empty: every From must be the zone itself or a name inside
@@ -364,10 +372,19 @@ type (
 		// From is the exact lower-case source hostname inside Zone. No
 		// wildcard, no scheme, no path.
 		From string `json:"from" yaml:"from"`
-		// To is the HTTPS destination origin: https://<host>, with no
-		// path, port, query or fragment. The request's path is appended
-		// to it, so the destination keeps the path.
+		// To is the HTTPS destination. By default it is an origin,
+		// https://<host> with no path, port, query or fragment, and the
+		// request's path is appended to it, so the destination keeps the
+		// path. With PreservePath false it is one fixed URL,
+		// https://<host> or https://<host>/<path> (no port, query,
+		// fragment or trailing "*"), and every path of From goes to
+		// exactly it.
 		To string `json:"to" yaml:"to"`
+		// PreservePath appends the request's path to To. Nil means true.
+		// False sends every path of From to exactly To (a static target
+		// URL): https://old.example/a and https://old.example/b both land
+		// on To. PreserveQueryString applies either way.
+		PreservePath *bool `json:"preservePath,omitempty" yaml:"preservePath,omitempty"`
 		// Status is the redirect status: 301 (the default), 302, 307 or
 		// 308.
 		Status int `json:"status,omitempty" yaml:"status,omitempty"`
@@ -386,12 +403,22 @@ type (
 func (r Record) WAFCovered() bool { return r.Proxied && (r.WAF == nil || *r.WAF) }
 
 // Record types Records accepts, and the DNS-only TTL range.
-var validRecordTypes = []string{"A", "AAAA", "CNAME", "NS"}
+var validRecordTypes = []string{"A", "AAAA", "CNAME", "NS", "TXT"}
 
 const (
 	minRecordTTL = 60
 	maxRecordTTL = 86400
+
+	// maxTXTLength is one DNS character-string (RFC 1035 3.3): a TXT
+	// record here is exactly one, so Cloudflare never splits it.
+	maxTXTLength = 255
 )
+
+// DNSOnly reports whether records of this type are always DNS only: an NS
+// delegation and a TXT record take no proxy and no WAF.
+func DNSOnly(recordType string) bool {
+	return recordType == "NS" || recordType == "TXT"
+}
 
 // Managed reports whether r declares any record.
 func (r *Records) Managed() bool {
@@ -471,6 +498,16 @@ func (r *Records) validate(zoneID string) error {
 			return fmt.Errorf("%s: an NS delegation cannot share its name with another record", where)
 		}
 
+		if e.Type == "TXT" {
+			if e.Proxied {
+				return fmt.Errorf("%s: a TXT record is DNS only; leave proxied false", where)
+			}
+
+			if e.WAF != nil {
+				return fmt.Errorf("%s: a TXT record is not in the managed WAF; remove waf", where)
+			}
+		}
+
 		if e.Proxied && e.TTL != 0 {
 			return fmt.Errorf("%s: a proxied record's TTL is automatic; leave ttl at 0", where)
 		}
@@ -481,7 +518,7 @@ func (r *Records) validate(zoneID string) error {
 
 		key := e.Name + " " + e.Type + " " + e.Content
 		if _, dup := seen[key]; dup {
-			return fmt.Errorf("%s: %s is listed twice", where, e.Content)
+			return fmt.Errorf("%s: %q is listed twice", where, e.Content)
 		}
 
 		seen[key] = struct{}{}
@@ -519,6 +556,35 @@ func validateRecordContent(typ, content string) error {
 			strings.ContainsAny(content, `*/:"\ `) || !strings.Contains(content, ".") {
 			return fmt.Errorf("content %q must be a lower-case %s without a trailing dot", content, what)
 		}
+	case "TXT":
+		return validateTXTContent(content)
+	}
+
+	return nil
+}
+
+// validateTXTContent holds a TXT record's text to one character-string the
+// zone component can quote without escaping: 1 to 255 printable ASCII
+// characters, no double quote, no backslash.
+func validateTXTContent(content string) error {
+	if content == "" {
+		return fmt.Errorf("a TXT record's content is empty")
+	}
+
+	if len(content) > maxTXTLength {
+		return fmt.Errorf("a TXT record's content is %d characters; at most %d fit in the one character-string a record here holds",
+			len(content), maxTXTLength)
+	}
+
+	if strings.ContainsAny(content, `"\`) {
+		return fmt.Errorf("a TXT record's content %q must not contain a double quote or a backslash: write the text without "+
+			"surrounding quotes, the zone adds them", content)
+	}
+
+	for i := 0; i < len(content); i++ {
+		if c := content[i]; c < 0x20 || c > 0x7e {
+			return fmt.Errorf("a TXT record's content %q must be printable ASCII (byte %d is 0x%02x)", content, i, c)
+		}
 	}
 
 	return nil
@@ -540,6 +606,16 @@ var redirectRefPattern = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,63}$`)
 
 // redirectStatuses are the statuses a Single Redirect takes.
 var redirectStatuses = []int{301, 302, 307, 308}
+
+// redirectPathPattern is the path of a fixed destination: absolute, made of
+// RFC 3986 path characters and percent escapes only.
+var redirectPathPattern = regexp.MustCompile(`^/(?:[A-Za-z0-9\-._~!$&'()*+,;=:@/]|%[0-9A-Fa-f]{2})*$`)
+
+// PreservesPath reports whether the redirect appends the request's path to
+// To: PreservePath nil or true.
+func (r *Redirect) PreservesPath() bool {
+	return r.PreservePath == nil || *r.PreservePath
+}
 
 // Managed reports whether r declares any redirect. Nil and an empty block
 // manage no phase.
@@ -606,7 +682,7 @@ func (r *Redirects) validate(zoneID string) error {
 
 		froms[e.From] = i
 
-		dest, err := validateRedirectTo(e.To)
+		dest, err := validateRedirectTo(e.To, e.PreservesPath())
 		if err != nil {
 			return fmt.Errorf("%s.to: %w", where, err)
 		}
@@ -653,10 +729,13 @@ func redirectLoop(start string, destinations map[string]string) []string {
 	}
 }
 
-// validateRedirectTo holds a destination to an HTTPS origin and returns its
-// host: https://<host>, with no path, port, query or fragment. The request's
-// path is appended to it by the rule, so a path here would be duplicated.
-func validateRedirectTo(to string) (string, error) {
+// validateRedirectTo holds a destination to an HTTPS URL and returns its
+// host. When the rule preserves the path, the destination is an origin,
+// https://<host> with no path, port, query or fragment: the request's path is
+// appended to it, so a path here would be duplicated. When it does not, the
+// destination is one fixed URL and may carry a path of its own (no port,
+// query, fragment or trailing "*").
+func validateRedirectTo(to string, preservePath bool) (string, error) {
 	u, err := url.Parse(to)
 	if err != nil {
 		return "", fmt.Errorf("%q is not a URL", to)
@@ -666,9 +745,28 @@ func validateRedirectTo(to string) (string, error) {
 		return "", fmt.Errorf("%q must be an HTTPS destination (https://<host>)", to)
 	}
 
-	if u.User != nil || u.Port() != "" || u.Path != "" || u.RawPath != "" || u.RawQuery != "" ||
-		u.ForceQuery || u.Fragment != "" || u.Opaque != "" {
-		return "", fmt.Errorf("%q must be an HTTPS origin (https://<host>) with no path, port, query or fragment", to)
+	if u.User != nil || u.Port() != "" || strings.HasSuffix(u.Host, ":") || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" ||
+		u.Opaque != "" || strings.ContainsAny(to, "?#") {
+		if preservePath {
+			return "", fmt.Errorf("%q must be an HTTPS origin (https://<host>) with no path, port, query or fragment", to)
+		}
+
+		return "", fmt.Errorf("%q must be an HTTPS URL (https://<host> or https://<host>/<path>) with no port, query or fragment", to)
+	}
+
+	if preservePath && (u.Path != "" || u.RawPath != "") {
+		return "", fmt.Errorf("%q must be an HTTPS origin (https://<host>) with no path, port, query or fragment: "+
+			"the request's path is appended to it; set preservePath false to send every path to this one URL", to)
+	}
+
+	if !preservePath {
+		// The destination is sent as written, so the path is checked as
+		// written: url.Parse would accept a space or a quote in it.
+		path, ok := strings.CutPrefix(to, "https://"+u.Host)
+		if !ok || (path != "" && (!redirectPathPattern.MatchString(path) || strings.HasSuffix(path, "*"))) {
+			return "", fmt.Errorf("%q must be https://<host> or https://<host>/<path>, the path made of URL path characters "+
+				"and %%XX escapes with no trailing \"*\": a fixed destination is sent as written", to)
+		}
 	}
 
 	host := u.Hostname()

@@ -41,6 +41,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"net/url"
 	"regexp"
 	"slices"
 	"sort"
@@ -198,12 +199,14 @@ type (
 		// so a rule added in the dashboard is replaced.
 		RateLimits *RateLimitsCfg `yaml:"rate_limits,omitempty"`
 		// Records are DNS records this zone serves for an origin no tunnel
-		// carries (a load balancer, a CDN), and child-zone NS delegations:
-		// the one place a hostname is written here rather than derived
-		// from the edge catalog. Only the listed records are managed; the
-		// zone's other records (hand made, imported) stay as they are. A
-		// name a tunnel serves is refused (validateRecordTunnels), and so
-		// is a tunnel host at or below an NS delegation.
+		// carries (a load balancer, a CDN), child-zone NS delegations, and
+		// TXT records (SPF, DMARC, a verification token): the one place a
+		// hostname is written here rather than derived from the edge
+		// catalog. Only the listed records are managed; the zone's other
+		// records (hand made, imported) stay as they are. A name a tunnel
+		// serves is refused (validateRecordTunnels): a TXT there would sit
+		// beside the tunnel's CNAME. So is a tunnel host at or below an NS
+		// delegation.
 		Records []RecordCfg `yaml:"records,omitempty"`
 		// Redirects are the zone's canonical-host Single Redirects: the
 		// complete intended rule list of the
@@ -342,7 +345,10 @@ type (
 	}
 
 	// RecordCfg mirrors cloudflare/zonespec Record in this file's
-	// snake_case: one A, AAAA, CNAME or child-zone NS record.
+	// snake_case: one A, AAAA, CNAME, child-zone NS or TXT record. A TXT
+	// content is the text without surrounding quotes (`v=spf1 -all`), at
+	// most 255 printable ASCII characters with no `"` or `\`; several TXT
+	// rows may share a name. NS and TXT are DNS only.
 	RecordCfg struct {
 		Name    string `yaml:"name"`
 		Type    string `yaml:"type"`
@@ -352,14 +358,15 @@ type (
 		Comment string `yaml:"comment,omitempty"`
 		// WAF is false to leave a proxied record's name out of a zone's
 		// derived managed WAF; absent is covered. False needs WAFReason.
-		// Never set on NS.
+		// Never set on NS or TXT.
 		WAF       *bool  `yaml:"waf,omitempty"`
 		WAFReason string `yaml:"waf_reason,omitempty"`
 	}
 
 	// RedirectCfg is one canonical-host Single Redirect in this file's
 	// snake_case. The source is matched exactly on HTTP and HTTPS for every
-	// path; To is an HTTPS origin and the request's path is appended. A
+	// path; To is an HTTPS origin and the request's path is appended, or,
+	// with preserve_path false, one fixed URL that every path goes to. A
 	// source whose DNS record is proxied makes that record wait for this
 	// rule's ruleset (the explicit rule-before-proxy dependency); a DNS-only
 	// source stages the rule without effect.
@@ -367,6 +374,11 @@ type (
 		Ref  string `yaml:"ref"`
 		From string `yaml:"from"`
 		To   string `yaml:"to"`
+		// PreservePath appends the request's path to To; absent means
+		// true, and To is then an origin (https://<host>). False sends
+		// every path of From to exactly To, which may carry a path
+		// (https://example.com/landing).
+		PreservePath *bool `yaml:"preserve_path,omitempty"`
 		// Status is 301 (default), 302, 307 or 308.
 		Status int `yaml:"status,omitempty"`
 		// PreserveQueryString keeps the query string; absent means true.
@@ -934,11 +946,12 @@ func (c *Config) deriveWAF(fromCatalog, excludedFromCatalog map[string][]string)
 				return fmt.Errorf("%s: zones[%s].records[%s].waf_reason: only meaningful with waf: false", FileName, name, r.Name)
 			}
 
-			// A delegation is DNS only and never a WAF host, even if an
-			// invalid row asked for both: reject it rather than derive it.
-			if r.Type == "NS" {
+			// A delegation or a TXT record is DNS only and never a WAF
+			// host, even if an invalid row asked for both: reject it
+			// rather than derive it.
+			if cfzone.DNSOnly(r.Type) {
 				if r.Proxied || r.WAF != nil {
-					return fmt.Errorf("%s: zones[%s].records[%s]: an NS delegation is DNS only and takes no WAF", FileName, name, r.Name)
+					return fmt.Errorf("%s: zones[%s].records[%s]: %s is DNS only and takes no WAF", FileName, name, r.Name, dnsOnlyNoun(r.Type))
 				}
 
 				continue
@@ -1590,7 +1603,7 @@ func (z Zone) RedirectsLibrary(zone string) *cfzone.Redirects {
 	out := &cfzone.Redirects{Zone: zone, Entries: make([]cfzone.Redirect, 0, len(z.Redirects))}
 	for _, r := range z.Redirects {
 		out.Entries = append(out.Entries, cfzone.Redirect{
-			Ref: r.Ref, From: r.From, To: r.To, Status: r.Status,
+			Ref: r.Ref, From: r.From, To: r.To, PreservePath: r.PreservePath, Status: r.Status,
 			PreserveQueryString: r.PreserveQueryString, Disabled: r.Disabled,
 		})
 	}
@@ -1599,11 +1612,12 @@ func (z Zone) RedirectsLibrary(zone string) *cfzone.Redirects {
 }
 
 // validateRecords holds the zone's records to the library's own rules, and
-// keeps an NS delegation out of the WAF's vocabulary entirely.
+// keeps an NS delegation or a TXT record out of the WAF's vocabulary
+// entirely.
 func (z Zone) validateRecords(where, zone string) error {
 	for _, r := range z.Records {
-		if r.Type == "NS" && (r.WAF != nil || r.WAFReason != "") {
-			return fmt.Errorf("%s[%s]: an NS delegation takes no WAF options; remove waf and waf_reason", where, r.Name)
+		if cfzone.DNSOnly(r.Type) && (r.WAF != nil || r.WAFReason != "") {
+			return fmt.Errorf("%s[%s]: %s takes no WAF options; remove waf and waf_reason", where, r.Name, dnsOnlyNoun(r.Type))
 		}
 	}
 
@@ -1629,6 +1643,17 @@ func (z Zone) validateRedirects(where, zone string) error {
 
 		if !rulesetIDPattern.MatchString(id) {
 			return fmt.Errorf("%s.redirect_rules_import_id: %q is not a ruleset id (32 lowercase hex digits)", where, id)
+		}
+	}
+
+	// The library's own refusal names its key (preservePath); this file's
+	// is preserve_path.
+	for _, r := range z.Redirects {
+		if r.PreservePath == nil || *r.PreservePath {
+			if u, err := url.Parse(r.To); err == nil && u.Scheme == "https" && u.Path != "" {
+				return fmt.Errorf("%s[%s].to: %q has a path, and the request's path is appended to an origin (https://<host>); "+
+					"set preserve_path: false to send every path to this one URL", where, r.Ref, r.To)
+			}
 		}
 	}
 
@@ -1671,6 +1696,11 @@ func (c *Config) validateRecordTunnels() error {
 					continue
 				}
 
+				if r.Type == "TXT" && t.OwnsRecord(name, r.Name) {
+					return fmt.Errorf("%s: zones[%s].records[%s]: tunnel %s writes this host's CNAME (the edge catalog), "+
+						"and a CNAME cannot share its name with a TXT record; put the TXT on another name", FileName, name, r.Name, t.Name())
+				}
+
 				if t.OwnsRecord(name, r.Name) {
 					return fmt.Errorf("%s: zones[%s].records[%s]: tunnel %s already carries this host (the edge catalog)",
 						FileName, name, r.Name, t.Name())
@@ -1680,6 +1710,15 @@ func (c *Config) validateRecordTunnels() error {
 	}
 
 	return nil
+}
+
+// dnsOnlyNoun names a DNS-only record type in a refusal.
+func dnsOnlyNoun(recordType string) string {
+	if recordType == "NS" {
+		return "an NS delegation"
+	}
+
+	return "a TXT record"
 }
 
 // atOrBelow reports whether host is the NS owner or a name under it. A

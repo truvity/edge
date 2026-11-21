@@ -5,6 +5,13 @@ heading here is a patch cut automatically for dependency bumps alone; its
 GitHub Release lists them. The chart and the Go module are released
 together at every version.
 
+## v4.13.0
+
+### Added
+
+- **`cloudflare/zone`, `cloudflare/zonespec`, `cloudflare/config`: TXT records.** A `records` entry may be `type: TXT`, its `content` the text without surrounding quotes (`v=spf1 -all`, `v=DMARC1; p=reject; sp=none;`): 1 to 255 printable ASCII characters, no `"` or `\`. The zone sends it to Cloudflare in double quotes (`zone.RecordContent`), the form Cloudflare's API stores and returns TXT content in, so a preview after the apply shows no diff. A TXT record is DNS only: `proxied`, `waf` and `waf_reason` are refused. One name may carry several TXT records and A or AAAA records beside them; an exact repeat, a CNAME or an NS delegation on the same name, and (in the config file) a name a tunnel writes its CNAME for are refused. Each is one `DnsRecord` named `record-<zone>-<host-slug>-txt-<hash>`, the first 8 hex digits of the SHA-256 of the text, so reordering rows renames nothing. The names of A, AAAA, CNAME and NS records are unchanged. See [docs/cloudflare/config.md](docs/cloudflare/config.md#txt-records).
+- **`cloudflare/zonespec`, `cloudflare/config`: a redirect to one fixed URL.** `Redirect.PreservePath` (`preservePath`; `preserve_path` in the config file), nil meaning true. False sends every path of the source to exactly `To`, which may then carry a path (`https://example.com/landing`); no port, query, fragment or trailing `*`. The rule's target is the static URL (`targetUrl.value`, `rulespec.RedirectParams.TargetValue`) instead of the path expression; `PreserveQueryString` keeps its meaning. A redirect that sets nothing renders as before, and a `To` with a path is still refused there, now with a pointer to `preserve_path: false`.
+
 ## v4.12.0
 
 ### Changed
