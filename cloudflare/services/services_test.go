@@ -197,3 +197,39 @@ func TestZoneOwnersDoNotMoveTheCNAMEs(t *testing.T) {
 
 	assert.Equal(t, before.ByKey(), after.ByKey())
 }
+
+// A cluster's HostOrigins sends one host of the company's tunnel there to
+// another service; the tunnel's other hosts, and the other clusters' tunnels,
+// keep Origin. A key that is no host of the company's tunnels on the cluster
+// is refused.
+func TestHostOrigins(t *testing.T) {
+	a := args(t, "example", &sunk{})
+	a.Clusters = []services.Cluster{{Name: "devel", DNSDomain: "k8s.internal"}}
+
+	var host string
+
+	for _, tun := range a.Config.Tunnels {
+		if tun.Cluster == "devel" && len(tun.Hosts) > 1 {
+			host = tun.Hosts[len(tun.Hosts)-1]
+
+			break
+		}
+	}
+
+	require.NotEmpty(t, host, "the fixture's devel tunnel has two hosts or more")
+
+	a.Clusters[0].HostOrigins = map[string]services.Origin{host: {Service: "gateway-other", Namespace: "other", Port: 8443}}
+	r, err := run(t, a)
+	require.NoError(t, err)
+
+	in := fmt.Sprint(r.ByKey()[ingress+"ingress-devel"].Inputs)
+	assert.Contains(t, in, "https://gateway-other.other.svc.k8s.internal:8443", "the listed host dials its own service")
+	assert.Contains(t, in, "https://gateway-internal.envoy-gateway-system.svc.k8s.internal:443", "the others keep Origin")
+
+	// The prod tunnel's ingress is unchanged: the map is the cluster's.
+	assert.NotContains(t, fmt.Sprint(r.ByKey()[ingress+"ingress-prod"].Inputs), "gateway-other")
+
+	a.Clusters[0].HostOrigins = map[string]services.Origin{"nowhere.example.invalid": {Service: "s", Namespace: "n"}}
+	_, err = run(t, a)
+	require.ErrorContains(t, err, "is no host of the company's tunnels there")
+}
