@@ -332,3 +332,67 @@ func TestTunnelArgsLeavesOutDNSElsewhere(t *testing.T) {
 	assert.Len(t, got.Ingress, 2)
 	require.NoError(t, got.Validate())
 }
+
+// A host listed in HostOrigins dials its own service; every other host, the
+// origin SNI and the CA pool are as before.
+func TestTunnelArgsHostOrigins(t *testing.T) {
+	args := baseArgs(nil)
+	args.Tunnels[0].Hosts = []string{"a.example.test", "b.example.test"}
+
+	before := TunnelArgs(args, "a1", "z1", args.Tunnels[0])
+
+	args.HostOrigins = map[string]Origin{"b.example.test": {Service: "gateway-other", Namespace: "other", Port: 8443}}
+	got := TunnelArgs(args, "a1", "z1", args.Tunnels[0])
+
+	require.Len(t, got.Ingress, 2)
+	assert.Equal(t, before.Ingress[0], got.Ingress[0], "a host not listed keeps the default origin")
+	assert.Equal(t, "https://gateway-other.other.svc.cluster.example:8443", got.Ingress[1].Service)
+	assert.Equal(t, "b.example.test", got.Ingress[1].OriginServerName, "the origin SNI stays the host")
+	assert.Equal(t, before.Ingress[1].CAPool, got.Ingress[1].CAPool)
+
+	// Port zero is the default port, as for Origin.
+	args.HostOrigins["b.example.test"] = Origin{Service: "gateway-other", Namespace: "other"}
+	got = TunnelArgs(args, "a1", "z1", args.Tunnels[0])
+	assert.Equal(t, "https://gateway-other.other.svc.cluster.example:443", got.Ingress[1].Service)
+
+	inZones, err := TunnelArgsInZones(args, "a1", map[string]string{args.Tunnels[0].Zone: "z1"}, args.Tunnels[0])
+	require.NoError(t, err)
+	assert.Equal(t, got, inZones)
+}
+
+// No HostOrigins, nil or empty, renders exactly what Origin alone renders.
+func TestTunnelArgsNoHostOriginsIsUnchanged(t *testing.T) {
+	args := baseArgs(nil)
+	want := TunnelArgs(args, "a1", "z1", args.Tunnels[0])
+
+	args.HostOrigins = map[string]Origin{}
+	assert.Equal(t, want, TunnelArgs(args, "a1", "z1", args.Tunnels[0]))
+
+	args.HostOrigins = nil
+	assert.Equal(t, want, TunnelArgs(args, "a1", "z1", args.Tunnels[0]))
+}
+
+func TestDeployHostOriginsRefusals(t *testing.T) {
+	for name, tc := range map[string]struct {
+		origins map[string]Origin
+		want    string
+	}{
+		"no service":       {map[string]Origin{"a.example.test": {Namespace: "other"}}, "needs a Service and a Namespace"},
+		"no namespace":     {map[string]Origin{"a.example.test": {Service: "gateway-other"}}, "needs a Service and a Namespace"},
+		"bad port":         {map[string]Origin{"a.example.test": {Service: "s", Namespace: "n", Port: 70000}}, "is not a TCP port"},
+		"no tunnel's host": {map[string]Origin{"z.example.test": {Service: "s", Namespace: "n"}}, "is no host of any tunnel"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			args := baseArgs((&sunk{}).sink)
+			args.HostOrigins = tc.origins
+			_, err := run(t, args)
+			require.ErrorContains(t, err, tc.want)
+		})
+	}
+
+	// A valid entry deploys.
+	args := baseArgs((&sunk{}).sink)
+	args.HostOrigins = map[string]Origin{"a.example.test": {Service: "gateway-other", Namespace: "other"}}
+	_, err := run(t, args)
+	require.NoError(t, err)
+}

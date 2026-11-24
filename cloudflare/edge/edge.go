@@ -85,6 +85,14 @@ type (
 		Zones    []Zone
 		Tunnels  []Tunnel
 		Origin   Origin
+		// HostOrigins sends the hosts it lists to another in-cluster
+		// service than Origin: the ingress rule of such a host dials its
+		// entry's Service, Namespace and Port, and keeps the host as its
+		// origin SNI and the same CA pool. A host not listed dials Origin.
+		// Every key must be a host of a tunnel; each entry needs a Service
+		// and a Namespace. Nil or empty renders exactly what Origin alone
+		// renders.
+		HostOrigins map[string]Origin
 		// CAPoolPath defaults to DefaultCAPoolPath.
 		CAPoolPath string
 		// Sink receives each tunnel's token. Required.
@@ -108,6 +116,10 @@ func Deploy(ctx *pulumi.Context, args Args) error {
 	}
 
 	if err := args.Origin.check(); err != nil {
+		return err
+	}
+
+	if err := checkHostOrigins(args.HostOrigins, args.Tunnels); err != nil {
 		return err
 	}
 
@@ -207,6 +219,10 @@ func DeployTunnel(
 		return err
 	}
 
+	if err := checkHostOrigins(args.HostOrigins, nil); err != nil {
+		return err
+	}
+
 	logger := args.Logger
 	if logger == nil {
 		logger = slog.New(slog.DiscardHandler)
@@ -260,6 +276,10 @@ func TunnelArgsInZones(args Args, accountID string, zoneIDs map[string]string, t
 		return tunnel.Args{}, err
 	}
 
+	if err := checkHostOrigins(args.HostOrigins, nil); err != nil {
+		return tunnel.Args{}, err
+	}
+
 	zones := tunnelZones(t)
 
 	if len(zones) == 1 {
@@ -293,6 +313,52 @@ func (o Origin) port() int {
 	}
 
 	return o.Port
+}
+
+// originURL is the address an ingress rule dials for o in a cluster whose
+// Kubernetes DNS domain is dnsDomain.
+func originURL(o Origin, dnsDomain string) string {
+	return fmt.Sprintf("https://%s.%s.svc.%s:%d", o.Service, o.Namespace, dnsDomain, o.port())
+}
+
+// checkHostOrigins refuses an entry of HostOrigins with no Service or no
+// Namespace or a port that is not a TCP port and, when tunnels are given, a
+// key that is no host of any of them.
+func checkHostOrigins(origins map[string]Origin, tunnels []Tunnel) error {
+	if len(origins) == 0 {
+		return nil
+	}
+
+	hosts := map[string]bool{}
+	for i := range tunnels {
+		for _, h := range tunnels[i].Hosts {
+			hosts[h] = true
+		}
+	}
+
+	keys := make([]string, 0, len(origins))
+	for k := range origins {
+		keys = append(keys, k)
+	}
+
+	sort.Strings(keys)
+
+	for _, host := range keys {
+		o := origins[host]
+		if o.Service == "" || o.Namespace == "" {
+			return fmt.Errorf("edge: host origin %q needs a Service and a Namespace", host)
+		}
+
+		if err := o.check(); err != nil {
+			return fmt.Errorf("edge: host origin %q: %w", host, err)
+		}
+
+		if tunnels != nil && !hosts[host] {
+			return fmt.Errorf("edge: host origin %q is no host of any tunnel", host)
+		}
+	}
+
+	return nil
 }
 
 // check refuses a Port that is not a TCP port. Zero is the default.
@@ -358,13 +424,18 @@ func tunnelArgs(args Args, accountID string, dns *tunnel.DNS, t Tunnel) tunnel.A
 		caPool = DefaultCAPoolPath
 	}
 
-	origin := fmt.Sprintf("https://%s.%s.svc.%s:%d", args.Origin.Service, args.Origin.Namespace, dnsDomain, args.Origin.port())
+	origin := originURL(args.Origin, dnsDomain)
 
 	ingress := make([]tunnel.Ingress, 0, len(t.Hosts))
 	for _, host := range t.Hosts {
+		service := origin
+		if o, ok := args.HostOrigins[host]; ok {
+			service = originURL(o, dnsDomain)
+		}
+
 		ingress = append(ingress, tunnel.Ingress{
 			Hostname:         host,
-			Service:          origin,
+			Service:          service,
 			OriginServerName: host,
 			CAPool:           caPool,
 		})

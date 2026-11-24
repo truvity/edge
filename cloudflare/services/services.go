@@ -41,6 +41,12 @@ type (
 		// DNSDomain is the cluster's Kubernetes DNS domain, for the origin
 		// service address. Empty is "cluster.<name>".
 		DNSDomain string
+		// HostOrigins sends the hosts it lists, of the company's tunnels on
+		// this cluster, to another in-cluster service than Origin
+		// (edge.Args.HostOrigins): the host stays the origin SNI. Every key
+		// must be a host of one of those tunnels; each entry needs a Service
+		// and a Namespace. Nil keeps every host on Origin.
+		HostOrigins map[string]Origin
 	}
 
 	// Origin is the in-cluster service every ingress rule routes to.
@@ -156,6 +162,11 @@ func Deploy(ctx *pulumi.Context, args Args) error {
 		origin.Service, origin.Namespace = cfg.Fleets.Internal.Service, cfg.Fleets.Internal.Namespace
 	}
 
+	hostOrigins, err := clusterHostOrigins(cfg, accounts, args.Clusters)
+	if err != nil {
+		return err
+	}
+
 	tunnels := map[string]Tunnel{}
 	edgeArgs := edge.Args{
 		Origin:     edge.Origin{Service: origin.Service, Namespace: origin.Namespace, Port: origin.Port},
@@ -194,7 +205,12 @@ func Deploy(ctx *pulumi.Context, args Args) error {
 		}
 		tunnels[et.Name] = t
 
-		if err := edge.DeployTunnel(ctx, edgeArgs, acct, cfg.Accounts[t.Account].AccountID, zoneIDs, zoneAccounts, et, tunnelIDs); err != nil {
+		// The cluster's host origins (Cluster.HostOrigins), for this
+		// tunnel's ingress only: nil leaves every host on Origin.
+		tunnelArgs := edgeArgs
+		tunnelArgs.HostOrigins = hostOrigins[t.Cluster]
+
+		if err := edge.DeployTunnel(ctx, tunnelArgs, acct, cfg.Accounts[t.Account].AccountID, zoneIDs, zoneAccounts, et, tunnelIDs); err != nil {
 			return fmt.Errorf("deploy tunnel %s: %w", et.Name, err)
 		}
 
@@ -253,4 +269,50 @@ func tunnelOrigins(cfg *config.Config, t edge.Tunnel) map[string]string {
 	}
 
 	return out
+}
+
+// clusterHostOrigins maps each cluster's HostOrigins onto edge's type, by
+// cluster, refusing a key that is no host of the company's tunnels on that
+// cluster (an entry's own fields are edge's to check). A cluster with none is
+// absent.
+func clusterHostOrigins(cfg *config.Config, accounts []string, clusters []Cluster) (map[string]map[string]edge.Origin, error) {
+	own := map[string]bool{}
+	for _, name := range accounts {
+		own[name] = true
+	}
+
+	out := map[string]map[string]edge.Origin{}
+
+	for _, c := range clusters {
+		if len(c.HostOrigins) == 0 {
+			continue
+		}
+
+		hosts := map[string]bool{}
+
+		for i := range cfg.Tunnels {
+			t := cfg.Tunnels[i]
+			if t.Cluster != c.Name || !own[t.Account] {
+				continue
+			}
+
+			for _, h := range t.Hosts {
+				hosts[h] = true
+			}
+		}
+
+		m := make(map[string]edge.Origin, len(c.HostOrigins))
+
+		for host, o := range c.HostOrigins {
+			if !hosts[host] {
+				return nil, fmt.Errorf("services: host origin %q of cluster %s is no host of the company's tunnels there", host, c.Name)
+			}
+
+			m[host] = edge.Origin{Service: o.Service, Namespace: o.Namespace, Port: o.Port}
+		}
+
+		out[c.Name] = m
+	}
+
+	return out, nil
 }

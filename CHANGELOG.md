@@ -5,6 +5,12 @@ heading here is a patch cut automatically for dependency bumps alone; its
 GitHub Release lists them. The chart and the Go module are released
 together at every version.
 
+## v4.14.0
+
+### Added
+
+- **`cloudflare/edge`, `cloudflare/services`: a per-host origin.** `edge.Args.HostOrigins` and `services.Cluster.HostOrigins` (`map[string]Origin`, keyed by host; in `services`, per cluster) send the hosts they list to another in-cluster service than `Origin`: the ingress rule of such a host dials `https://<Service>.<Namespace>.svc.<dns-domain>:<Port>` (Port zero is the default port), and keeps the host as its origin SNI and the same CA pool. Every other host dials `Origin`, as before; nil or empty renders exactly what `Origin` alone renders. An entry needs a `Service` and a `Namespace` and a TCP port; a key that is no host of a tunnel (in `services`, of the company's tunnels on that cluster) is refused. One tunnel can so serve hosts whose routes live behind different gateways.
+
 ## v4.13.1
 
 - Dependency updates.

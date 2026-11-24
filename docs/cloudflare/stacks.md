@@ -80,6 +80,10 @@ zone's `origin_cnames` has its CNAME's content rewritten to that origin.
 `Clusters` only supplies each cluster's Kubernetes DNS domain (default
 `cluster.<name>`); every tunnel of the company is deployed whether or not its
 cluster is listed. `Origin` defaults to the registry's `fleets.internal`.
+A cluster's `HostOrigins` sends the hosts it lists to another in-cluster service (its
+`Service`, `Namespace` and `Port`; the host stays the origin SNI): one tunnel
+can then serve hosts whose routes live behind different gateways. A key must
+be a host of one of the company's tunnels on that cluster.
 
 The hooks (`AccountOptions`, `ZoneOptions`, `TunnelOptions`, `Contributions`)
 add resource options and rules. An estate adopting existing resources passes
