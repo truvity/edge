@@ -176,6 +176,29 @@
         }
       }
     },
+    "route": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "the site's HTTPRoute: every path of its hostnames to the server, on the listener parentRef names",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "hostname": { "anyOf": [{ "const": "" }, { "type": "string", "maxLength": 253, "pattern": "^(\\*\\.)?[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$" }] },
+        "hostnames": { "type": "array", "maxItems": 16, "uniqueItems": true, "items": { "type": "string", "maxLength": 253, "pattern": "^(\\*\\.)?[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$" } },
+        "parentRef": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "group": { "type": "string" },
+            "kind": { "type": "string", "minLength": 1 },
+            "name": { "type": "string", "minLength": 1, "maxLength": 253 },
+            "namespace": { "type": "string", "minLength": 1, "maxLength": 63 },
+            "sectionName": { "type": "string", "minLength": 1, "maxLength": 253 }
+          }
+        },
+        "annotations": { "type": "object", "additionalProperties": { "type": "string" } },
+        "labels": { "type": "object", "additionalProperties": { "type": "string" } }
+      }
+    },
     "headers": { "type": "object", "additionalProperties": { "type": "string" } },
     "logLevel": { "enum": ["debug", "info", "warn", "error"] },
     "service": {

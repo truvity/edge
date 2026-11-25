@@ -1,0 +1,19 @@
+# The site's route: every path of its two names to the server, on a
+# ListenerSet of another namespace, with an annotation the gateway's policy
+# reads. A single-page application, so a path with no file answers the shell.
+site:
+  artifact:
+    ref: registry.example.com/static/www
+    digest: sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+  spaFallback: true
+route:
+  enabled: true
+  hostname: www.example.com
+  hostnames:
+    - example.com
+  parentRef:
+    kind: ListenerSet
+    name: www
+    namespace: gateways
+  annotations:
+    example.com/access: anonymous

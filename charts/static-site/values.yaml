@@ -180,6 +180,28 @@ live:
 #   volumeMounts: [{name: live, mountPath: /var/run/live}]
 extraContainers: []
 
+# The site's route (Gateway API HTTPRoute), in the release's namespace: every
+# path of `hostname` (and of `hostnames`) to the server, as one rule named
+# `site`. Off by default: a site behind an Ingress, or one whose route
+# something else renders, needs none.
+#
+# `parentRef` is the listener the route attaches to, and whoever runs the
+# gateway provides it: `name` is required; `group` and `kind` default to a
+# Gateway (name a ListenerSet with kind: ListenerSet); `namespace` and
+# `sectionName` are optional. Who may read the site is the gateway's policy:
+# `annotations` and `labels` carry whatever that policy reads.
+route:
+  enabled: false
+  hostname: ""
+  hostnames: []
+  parentRef: {}
+    # group: gateway.networking.k8s.io
+    # kind: Gateway
+    # name: public
+    # namespace: gateways
+    # sectionName: https
+  annotations: {}
+  labels: {}
 # Response headers added to every response, over the defaults (nosniff,
 # X-Frame-Options DENY, a strict-origin-when-cross-origin referrer policy).
 # An empty value removes a default.

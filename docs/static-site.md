@@ -513,6 +513,40 @@ role what it needs with `registry.ack.extraStatements` of `static-site-infra`
 A live file is public like the rest of the site: list only names whose content
 may be read by anyone who can reach it.
 
+## The route
+
+`route.enabled` renders the site's Gateway API `HTTPRoute` in the release's
+namespace, beside the Service it sends to. It is off by default: a site
+behind an Ingress, or one whose route something else renders, needs none.
+
+```yaml
+route:
+  enabled: true
+  hostname: www.example.com
+  hostnames: [example.com]        # more names, optional
+  parentRef:
+    kind: ListenerSet             # default: Gateway
+    name: www
+    namespace: gateways           # default: the route's own namespace
+  annotations: {}                 # whatever the gateway's policy reads
+```
+
+| | |
+|---|---|
+| names | `hostname`, then each of `hostnames`, once each |
+| parent | the one listener `parentRef` names; `name` is required, `group` and `kind` default to a Gateway, `namespace` and `sectionName` are optional. Whoever runs the gateway provides it |
+| rule | one, named `site`: every path to the server. A policy that gates the site targets the route with `sectionName: site` |
+| backend | the release's Service on `service.port`, with group, kind and weight written out, so a controller that compares the live route with the rendered one sees no difference |
+| refused at render | `enabled` with no `hostname` or no `parentRef.name`, a hostname that is not a DNS name, a key the chart does not know |
+
+The route ships with the Service on purpose. A route whose backend arrives
+later does not resolve it and degrades whatever owns the route; a site with
+no route is reachable by nobody.
+
+The chart does not decide who may read the site. The server does not
+authenticate (see Serving): a private site needs the gateway's sign-in in
+front of it, and `annotations` and `labels` carry what that policy reads.
+
 ## Operations
 
 - Site port 8080, ops port 8081: `/healthz` (process up), `/readyz` (content
@@ -546,7 +580,8 @@ site and ops ports (restricted by `ingressFrom` and `metricsFrom` when set) and
 egress to DNS and HTTPS. `cache.private: true` makes every response `private, no-store`
 (see Serving). It does not authenticate: a consuming estate that serves a private
 site must put its sign-in in front of the site, and the server is then reachable
-only through that gateway. `live` and `extraContainers` add files a second
+only through that gateway. `route` renders the site's `HTTPRoute` (see The
+route). `live` and `extraContainers` add files a second
 container of the pod keeps current (see Live files). `values.schema.json` is strict at the top level, and
 every refusal has a fixture under `tests/invalid/static-site/`.
 
