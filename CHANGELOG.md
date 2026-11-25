@@ -5,6 +5,12 @@ heading here is a patch cut automatically for dependency bumps alone; its
 GitHub Release lists them. The chart and the Go module are released
 together at every version.
 
+## v4.15.0
+
+### Added
+
+- **`static-site` chart: the site's route.** `route.enabled` renders a Gateway API `HTTPRoute` in the release's namespace, beside the Service: every path of `route.hostname` (and of `route.hostnames`) to the server, as one rule named `site`, on the listener `route.parentRef` names (a Gateway by default; a ListenerSet with `kind: ListenerSet`). `route.annotations` and `route.labels` carry what the gateway's policy reads. Off by default, so no existing render changes. Until now the chart rendered no route, and a site needed one from elsewhere.
+
 ## v4.14.0
 
 ### Added

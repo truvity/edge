@@ -1,0 +1,57 @@
+{{- if .Values.route.enabled }}
+{{- $r := .Values.route }}
+{{- $parent := required "static-site: route.parentRef.name is required when route.enabled (the listener the route attaches to)" ($r.parentRef | default dict).name }}
+{{- $hosts := concat (list (required "static-site: route.hostname is required when route.enabled" $r.hostname)) ($r.hostnames | default list) | uniq }}
+{{- /*
+The site's route, shipped WITH the Service on purpose: a route whose backend
+arrives later reads BackendNotFound and degrades whatever owns it, and a site
+with no route is reachable by nobody.
+
+One rule, named `site`, every path to the server. The name is a contract: a
+policy that gates the site targets the route with `sectionName: site`.
+The API server's defaults are written out (group "", kind Service, weight 1)
+so that a controller comparing the live route to this one sees no difference.
+
+Who may read the site is not decided here: the route's annotations and labels
+are the caller's, and the policy that reads them is the gateway's.
+*/}}
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: {{ include "static-site.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "static-site.labels" . | nindent 4 }}
+    {{- with $r.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- with $r.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  parentRefs:
+    - group: {{ $r.parentRef.group | default "gateway.networking.k8s.io" }}
+      kind: {{ $r.parentRef.kind | default "Gateway" }}
+      name: {{ $parent }}
+      {{- with $r.parentRef.namespace }}
+      namespace: {{ . }}
+      {{- end }}
+      {{- with $r.parentRef.sectionName }}
+      sectionName: {{ . }}
+      {{- end }}
+  hostnames:
+    {{- toYaml $hosts | nindent 4 }}
+  rules:
+    - name: site
+      matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: {{ include "static-site.fullname" . }}
+          port: {{ .Values.service.port }}
+          weight: 1
+{{- end }}
