@@ -246,7 +246,24 @@
         "routes": {
           "type": "array",
           "items": { "$ref": "#/definitions/route" }
+        },
+        "extraParentRefs": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/parentRef" }
         }
+      }
+    },
+    "parentRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {
+        "group": { "type": "string" },
+        "kind": { "type": "string", "enum": ["Gateway", "ListenerSet"] },
+        "name": { "type": "string", "minLength": 1 },
+        "namespace": { "type": "string" },
+        "sectionName": { "type": "string" },
+        "port": { "type": "integer", "minimum": 1, "maximum": 65535 }
       }
     },
     "route": {

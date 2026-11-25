@@ -1,0 +1,161 @@
+---
+# Source: gateway-groups/templates/certificate.yaml
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: console-example-com-tls
+  namespace: envoy-gateway-system
+spec:
+  secretName: console-example-com-tls
+  dnsNames:
+    - "console.example.com"
+  privateKey:
+    rotationPolicy: Always
+  issuerRef:
+    group: cert-manager.io
+    kind: ClusterIssuer
+    name: example-ca
+
+---
+# Source: gateway-groups/templates/certificate.yaml
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: metrics-example-com-tls
+  namespace: envoy-gateway-system
+spec:
+  secretName: metrics-example-com-tls
+  dnsNames:
+    - "metrics.example.com"
+  privateKey:
+    rotationPolicy: Always
+  issuerRef:
+    group: cert-manager.io
+    kind: ClusterIssuer
+    name: example-ca
+
+---
+# Source: gateway-groups/templates/httproute.yaml
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: console
+  namespace: envoy-gateway-system
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: ListenerSet
+      name: console
+      namespace: envoy-gateway-system
+    - group: gateway.networking.k8s.io
+      kind: ListenerSet
+      name: console-new
+      namespace: envoy-gateway-new
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: edge
+      namespace: envoy-gateway-new
+      sectionName: https
+  hostnames:
+    - console.example.com
+  rules:
+    - backendRefs:
+      - group: ""
+        kind: Service
+        name: console
+        port: 8080
+        weight: 1
+      matches:
+      - path:
+          type: PathPrefix
+          value: /
+      name: app
+
+---
+# Source: gateway-groups/templates/httproute.yaml
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: metrics
+  namespace: envoy-gateway-system
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: ListenerSet
+      name: metrics
+      namespace: envoy-gateway-system
+  hostnames:
+    - metrics.example.com
+  rules:
+    - backendRefs:
+      - group: ""
+        kind: Service
+        name: metrics
+        port: 8080
+        weight: 1
+      matches:
+      - path:
+          type: PathPrefix
+          value: /
+
+---
+# Source: gateway-groups/templates/listenerset.yaml
+apiVersion: gateway.networking.k8s.io/v1
+kind: ListenerSet
+metadata:
+  name: console
+  namespace: envoy-gateway-system
+spec:
+  parentRef:
+    group: gateway.networking.k8s.io
+    kind: Gateway
+    name: private
+    namespace: envoy-gateway-system
+  listeners:
+    - allowedRoutes:
+        kinds:
+        - group: gateway.networking.k8s.io
+          kind: HTTPRoute
+        namespaces:
+          from: Same
+      hostname: console.example.com
+      name: console-example-com
+      port: 443
+      protocol: HTTPS
+      tls:
+        certificateRefs:
+        - group: ""
+          kind: Secret
+          name: console-example-com-tls
+        mode: Terminate
+
+---
+# Source: gateway-groups/templates/listenerset.yaml
+apiVersion: gateway.networking.k8s.io/v1
+kind: ListenerSet
+metadata:
+  name: metrics
+  namespace: envoy-gateway-system
+spec:
+  parentRef:
+    group: gateway.networking.k8s.io
+    kind: Gateway
+    name: private
+    namespace: envoy-gateway-system
+  listeners:
+    - allowedRoutes:
+        kinds:
+        - group: gateway.networking.k8s.io
+          kind: HTTPRoute
+        namespaces:
+          from: Same
+      hostname: metrics.example.com
+      name: metrics-example-com
+      port: 443
+      protocol: HTTPS
+      tls:
+        certificateRefs:
+        - group: ""
+          kind: Secret
+          name: metrics-example-com-tls
+        mode: Terminate

@@ -1,0 +1,46 @@
+# A group whose routes also attach to the ListenerSet (and a Gateway) of
+# another gateway, for a move between gateways with no gap. The group
+# beside it sets none and renders as it does without the key; so does one
+# that sets an empty list.
+defaults:
+  namespace: envoy-gateway-system
+  parent:
+    name: private
+  certificate:
+    issuerRef:
+      name: example-ca
+      kind: ClusterIssuer
+      group: cert-manager.io
+
+groups:
+  console:
+    domains:
+      - console.example.com
+    # Defaults left out: group and kind (Gateway) are written out.
+    extraParentRefs:
+      - kind: ListenerSet
+        name: console-new
+        namespace: envoy-gateway-new
+      - name: edge
+        namespace: envoy-gateway-new
+        sectionName: https
+    routes:
+      - name: console
+        namespace: envoy-gateway-system
+        rules:
+          - name: app
+            matches:
+              - path: {type: PathPrefix, value: /}
+            backend: {name: console, port: 8080}
+
+  metrics:
+    domains:
+      - metrics.example.com
+    extraParentRefs: []
+    routes:
+      - name: metrics
+        namespace: envoy-gateway-system
+        rules:
+          - matches:
+              - path: {type: PathPrefix, value: /}
+            backend: {name: metrics, port: 8080}

@@ -5,6 +5,12 @@ heading here is a patch cut automatically for dependency bumps alone; its
 GitHub Release lists them. The chart and the Go module are released
 together at every version.
 
+## v4.16.0
+
+### Added
+
+- **`gateway-groups` (and `gateway-projects`): `groups.<name>.extraParentRefs`.** A list of Gateway API ParentReferences appended, after the group's own ListenerSet, to the `parentRefs` of every route in the group's `routes`, so a route can answer on two gateways while it moves from one to the other. Each entry needs a `name`; `kind` is `Gateway` (default) or `ListenerSet`; `group` and `kind` are written out with the API's defaults so Argo sees no drift, and `namespace`, `sectionName` and `port` are rendered when given. Off by default: with the value absent or `[]` the render is byte-identical to v4.15.0. See [docs/gateway/reference.md](docs/gateway/reference.md#groupsnameroutes).
+
 ## v4.15.0
 
 ### Added
