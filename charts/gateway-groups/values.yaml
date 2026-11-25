@@ -145,6 +145,17 @@ groups: {}
 #            backend: {name: console, port: 8080}   # group "", kind Service, weight 1 are written out
 #            filters: []        # a redirect has filters and no backend
 #            extra: {}          # merged over the rule: timeouts, retry
+#
+#    # Further parents of EVERY route of this group, appended after the
+#    # group's own ListenerSet: a route that moves between gateways answers
+#    # on both for a while. A Gateway API ParentReference; group
+#    # (gateway.networking.k8s.io) and kind (Gateway) are written out when
+#    # left out. Empty renders exactly what it did without the key.
+#    extraParentRefs: []
+#    #  - kind: ListenerSet
+#    #    name: other-gateway-console
+#    #    namespace: envoy-gateway-system
+#    #    sectionName: console
 
 # Grants that let a route refer to a backend in another namespace
 # (Gateway API ReferenceGrant), each in the backend's namespace. Off unless

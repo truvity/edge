@@ -78,6 +78,7 @@ networkPolicy:
   ports: []
 networkPolicies: []
 routes: []
+extraParentRefs: []
 {{- end -}}
 
 {{/*

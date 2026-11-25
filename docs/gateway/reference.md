@@ -240,6 +240,15 @@ renders none of its routes.
 The parent is the group's own ListenerSet, so a route cannot name a listener
 that does not exist.
 
+`groups.<name>.extraParentRefs` (default `[]`) adds further parents to every
+route of the group, after its own ListenerSet: while routes move from one
+gateway to another, each answers on both. An entry is a Gateway API
+ParentReference: `name` is required; `kind` is `Gateway` (the default) or
+`ListenerSet`; `group` (`gateway.networking.k8s.io`) and `kind` are written
+out, and `namespace`, `sectionName` and `port` are rendered only when set. An
+unknown key, a missing name or another kind fails the render. Empty renders
+exactly what the group rendered without the key.
+
 ### Shared hosts: `domains[].paths`
 
 A domain with `paths` is a **shared host**: each entry grants one path

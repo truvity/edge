@@ -83,6 +83,31 @@
 {{- end }}
 {{- end }}
 {{- end }}
+{{- /* extraParentRefs: further parents of every route of this group, written
+       out with the API's defaults (group, kind) so a GitOps diff never sees
+       a field the API server fills in. Appended after the group's own
+       ListenerSet; empty adds nothing. */}}
+{{- $extraParents := list }}
+{{- range $k, $p := $g.extraParentRefs }}
+{{- $pw := printf "groups.%s.extraParentRefs[%d]" $name $k }}
+{{- range $pk, $pv := $p }}
+{{- if not (has $pk (list "group" "kind" "name" "namespace" "sectionName" "port")) }}
+{{- fail (printf "%s.%s is not a key of a parentRef — known keys: group, kind, name, namespace, sectionName, port" $pw $pk) }}
+{{- end }}
+{{- end }}
+{{- if not $p.name }}
+{{- fail (printf "%s.name is required — the Gateway or ListenerSet the route also attaches to" $pw) }}
+{{- end }}
+{{- $kind := $p.kind | default "Gateway" }}
+{{- if not (has $kind (list "Gateway" "ListenerSet")) }}
+{{- fail (printf "%s.kind is %q — a route attaches to a Gateway or a ListenerSet" $pw $kind) }}
+{{- end }}
+{{- $out := dict "group" (hasKey $p "group" | ternary $p.group "gateway.networking.k8s.io") "kind" $kind "name" $p.name }}
+{{- with $p.namespace }}{{- $_ := set $out "namespace" . }}{{- end }}
+{{- with $p.sectionName }}{{- $_ := set $out "sectionName" . }}{{- end }}
+{{- with $p.port }}{{- $_ := set $out "port" (int .) }}{{- end }}
+{{- $extraParents = append $extraParents $out }}
+{{- end }}
 {{- $rules := list }}
 {{- $ruleNames := dict }}
 {{- range $j, $rule := $route.rules }}
@@ -115,6 +140,9 @@ spec:
       kind: ListenerSet
       name: {{ $g.listenerSetName }}
       namespace: {{ $g.namespace }}
+    {{- with $extraParents }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
   hostnames:
     {{- toYaml $hostnames | nindent 4 }}
   rules:
