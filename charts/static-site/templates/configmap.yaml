@@ -24,3 +24,15 @@ data:
   {{ $name }}: {{ $content | quote }}
   {{- end }}
 {{- end }}
+{{- if include "static-site.flagsOn" . }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "static-site.fullname" . }}-flags
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "static-site.labels" . | nindent 4 }}
+data:
+  manifest.json: {{ include "static-site.flagsManifest" . | quote }}
+{{- end }}

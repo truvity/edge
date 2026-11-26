@@ -1,0 +1,14 @@
+site:
+  artifact:
+    ref: registry.example.com/static/www
+    digest: sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+registry:
+  auth: ecr
+serviceAccount:
+  name: static-site
+flags:
+  appconfig:
+    enabled: true
+    application: shop-web
+    environment: globex
+    profile: flags

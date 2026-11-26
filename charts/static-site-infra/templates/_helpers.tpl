@@ -51,6 +51,9 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 
 {{/* Refuse settings that contradict each other. */}}
 {{- define "static-site-infra.validate" -}}
+{{- if and .Values.flags.appconfig.configurationArn (not .Values.registry.ack.enabled) -}}
+{{- fail "flags.appconfig.configurationArn is a statement on the role registry.ack makes: it needs registry.ack.enabled" -}}
+{{- end -}}
 {{- with .Values.registry.ack -}}
 {{- if .enabled -}}
 {{- if ne $.Values.registry.auth "ecr" -}}

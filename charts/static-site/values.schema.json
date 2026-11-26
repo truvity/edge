@@ -35,6 +35,18 @@
             "tag": { "type": "string" },
             "digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" }
           }
+        },
+        "appconfig-agent": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "the AWS AppConfig Agent, the writer of the flags file (flags.appconfig)",
+          "required": ["repository", "digest"],
+          "properties": {
+            "registry": { "type": "string" },
+            "repository": { "type": "string", "minLength": 1 },
+            "tag": { "type": "string" },
+            "digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" }
+          }
         }
       }
     },
@@ -173,6 +185,28 @@
         "properties": {
           "name": { "type": "string", "minLength": 1 },
           "image": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "flags": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "feature flags as a live file",
+      "properties": {
+        "appconfig": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "one AWS AppConfig feature-flag configuration, written to the live volume by the AppConfig Agent as a second container",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "application": { "type": "string", "pattern": "^([A-Za-z0-9_.-]{1,64})?$" },
+            "environment": { "type": "string", "pattern": "^([A-Za-z0-9_.-]{1,64})?$" },
+            "profile": { "type": "string", "pattern": "^([A-Za-z0-9_.-]{1,128})?$" },
+            "region": { "type": "string", "pattern": "^([a-z]{2}(-[a-z]+)+-[0-9])?$" },
+            "file": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}\\.json$" },
+            "pollInterval": { "type": "integer", "minimum": 5, "maximum": 3600 },
+            "resources": { "type": "object" }
+          }
         }
       }
     },

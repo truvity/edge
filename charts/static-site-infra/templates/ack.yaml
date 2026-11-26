@@ -83,6 +83,17 @@ spec:
           ],
           "Resource": {{ $ack.repositoryArns | toJson }}
         }
+        {{- with .Values.flags.appconfig.configurationArn }},
+        {
+          "Sid": "ReadFlags",
+          "Effect": "Allow",
+          "Action": [
+            "appconfig:StartConfigurationSession",
+            "appconfig:GetLatestConfiguration"
+          ],
+          "Resource": [{{ . | toJson }}]
+        }
+        {{- end }}
         {{- range $ack.extraStatements }},
         {{ toJson . }}
         {{- end }}

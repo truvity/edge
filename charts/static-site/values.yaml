@@ -22,6 +22,13 @@ images:
     repository: truvity/k8s/identity-check
     tag: 0.34.0
     digest: sha256:9fc40a066f5455eb807f0826f7083b0ead46924956af3c8ed5e2c381233d1a38
+  # The AWS AppConfig Agent, the writer of the flags file (flags.appconfig).
+  # A multi-architecture index, pinned by tag and digest.
+  appconfig-agent:
+    registry: public.ecr.aws
+    repository: aws-appconfig/aws-appconfig-agent
+    tag: 2.0.250954
+    digest: sha256:7828c07dca6fdffcfc24784bdd56e5ee17e452beff6e643ee03f2a13ce2ff1c8
 
 # Secrets for pulling the SERVER image (not the site artifact).
 imagePullSecrets: []
@@ -179,6 +186,41 @@ live:
 # volume `live`:
 #   volumeMounts: [{name: live, mountPath: /var/run/live}]
 extraContainers: []
+
+# Feature flags as a live file, from AWS AppConfig. With `enabled`, the pod
+# gets a second container, the AWS AppConfig Agent, which polls one
+# feature-flag configuration and writes it to the live volume; the server
+# serves it at /<file> like any live file (checked, never cached, the last
+# good version kept). A flag then changes with an AppConfig deployment: no
+# release and no restart. The file is the configuration as AppConfig returns
+# it, {"<flag>": {"enabled": true, ...}, ...}, and it is public like the site.
+# Until the configuration has its first deployment there is no file and the
+# name answers 404.
+#
+# The pod needs AWS credentials (registry.auth=ecr gives it the role) and the
+# role needs the two reads of that configuration: the static-site-infra chart
+# adds them from flags.appconfig.configurationArn.
+flags:
+  appconfig:
+    enabled: false
+    # The configuration, by the NAMES of its application, environment and
+    # profile. Required when enabled.
+    application: ""
+    environment: ""
+    profile: ""
+    # The AWS region of the configuration. Required when enabled.
+    region: ""
+    # The file name, served at the site root.
+    file: flags.json
+    # How often the agent asks AppConfig for a change, in seconds. With the
+    # server's live.interval this is how long a change takes to be served.
+    pollInterval: 15
+    resources:
+      requests:
+        cpu: 10m
+        memory: 32Mi
+      limits:
+        memory: 64Mi
 
 # Small files for the extra containers: what a container reads at start and
 # cannot be given in an environment variable, such as a configuration or

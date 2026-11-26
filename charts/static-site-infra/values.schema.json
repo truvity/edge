@@ -123,6 +123,24 @@
         }
       }
     },
+    "flags": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "what the flags file of the static-site chart needs of the role",
+      "properties": {
+        "appconfig": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "configurationArn": {
+              "type": "string",
+              "description": "the one AWS AppConfig configuration the role may read",
+              "pattern": "^(arn:aws[a-z-]*:appconfig:[a-z]{2}(-[a-z]+)+-[0-9]:[0-9]{12}:application/[a-z0-9]{4,7}/environment/[a-z0-9]{4,7}/configuration/[a-z0-9]{4,7})?$"
+            }
+          }
+        }
+      }
+    },
     "serviceAccount": {
       "type": "object",
       "additionalProperties": false,
