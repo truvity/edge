@@ -496,7 +496,11 @@ at `/var/run/live`; the writer is a container of the same pod that mounts the
 same volume. `extraContainers` is rendered verbatim, and the pod's
 `securityContext` applies to it. When the writer calls a cloud API, give the
 role what it needs with `registry.ack.extraStatements` of `static-site-infra`
-(`Allow` only, explicit resource ARNs).
+(`Allow` only, explicit resource ARNs). Where one party sets those
+statements and another decides what they may reach, the second sets
+`registry.ack.allowedExtraActions`: a statement with an action outside the
+list is refused at render. An action is matched as written, so a wildcard
+passes only when the list holds that wildcard.
 
 | | |
 |---|---|

@@ -1,0 +1,14 @@
+registry:
+  auth: ecr
+  ack:
+    enabled: true
+    clusterName: example
+    repositoryArns:
+      - arn:aws:ecr:eu-central-1:123456789012:repository/example
+    allowedExtraActions:
+      - appconfig:StartConfigurationSession
+      - appconfig:GetLatestConfiguration
+    extraStatements:
+      - Effect: Allow
+        Action: ["appconfig:Get*"]
+        Resource: ["arn:aws:appconfig:eu-central-1:123456789012:application/abc1234"]
