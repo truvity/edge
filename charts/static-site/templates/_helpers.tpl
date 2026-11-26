@@ -105,6 +105,9 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- fail "extraContainers: the name static-site is the server's" -}}
 {{- end -}}
 {{- end -}}
+{{- if and .Values.extraFiles (not .Values.extraContainers) -}}
+{{- fail "extraFiles needs extraContainers: the files are for an extra container, the server does not read them" -}}
+{{- end -}}
 {{- end -}}
 
 {{/*

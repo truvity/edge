@@ -5,6 +5,12 @@ heading here is a patch cut automatically for dependency bumps alone; its
 GitHub Release lists them. The chart and the Go module are released
 together at every version.
 
+## v4.17.0
+
+### Added
+
+- **`static-site` chart: `extraFiles`, small files for the extra containers.** A map of file name to content, rendered as one ConfigMap (`<fullname>-extra-files`) and added to the pod as the volume `extra-files`, which an extra container mounts read-only. It is for what a container reads at start and cannot take from an environment variable, such as the manifest that tells a writer of the live files what to write where. The server does not mount the volume and never serves the files. A change of a file restarts the pods. At most 16 files of 64 KiB, plain file names; `extraFiles` without `extraContainers` is refused. Empty by default: every existing render is unchanged. See [docs/static-site.md](docs/static-site.md#files-for-the-writer).
+
 ## v4.16.0
 
 ### Added

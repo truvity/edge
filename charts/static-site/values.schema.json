@@ -176,6 +176,13 @@
         }
       }
     },
+    "extraFiles": {
+      "type": "object",
+      "description": "small files for the extra containers, by file name: one ConfigMap, the volume extra-files",
+      "maxProperties": 16,
+      "propertyNames": { "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$" },
+      "additionalProperties": { "type": "string", "minLength": 1, "maxLength": 65536 }
+    },
     "route": {
       "type": "object",
       "additionalProperties": false,

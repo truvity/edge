@@ -23,6 +23,9 @@ spec:
         {{- end }}
       annotations:
         checksum/placeholders: {{ include "static-site.placeholders" . | sha256sum }}
+        {{- if .Values.extraFiles }}
+        checksum/extra-files: {{ toJson .Values.extraFiles | sha256sum }}
+        {{- end }}
         {{- with .Values.podAnnotations }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
@@ -210,6 +213,11 @@ spec:
           emptyDir:
             medium: Memory
             sizeLimit: {{ .Values.live.sizeLimit | quote }}
+        {{- end }}
+        {{- if .Values.extraFiles }}
+        - name: extra-files
+          configMap:
+            name: {{ include "static-site.fullname" . }}-extra-files
         {{- end }}
         {{- if (include "static-site.inlinePlaceholders" . | fromJson) }}
         - name: placeholders

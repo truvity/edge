@@ -10,3 +10,17 @@ data:
   placeholders.json: |
     {{- include "static-site.placeholders" . | nindent 4 }}
 {{- end }}
+{{- if .Values.extraFiles }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "static-site.fullname" . }}-extra-files
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "static-site.labels" . | nindent 4 }}
+data:
+  {{- range $name, $content := .Values.extraFiles }}
+  {{ $name }}: {{ $content | quote }}
+  {{- end }}
+{{- end }}

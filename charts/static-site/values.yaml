@@ -180,6 +180,18 @@ live:
 #   volumeMounts: [{name: live, mountPath: /var/run/live}]
 extraContainers: []
 
+# Small files for the extra containers: what a container reads at start and
+# cannot be given in an environment variable, such as a configuration or
+# manifest file. A map of file name to content. The chart renders them as one
+# ConfigMap and adds the volume `extra-files` to the pod; a container that
+# wants them mounts it, read-only:
+#   volumeMounts: [{name: extra-files, mountPath: /etc/extra, readOnly: true}]
+# The server does not mount it and never serves these files. A change of a
+# file restarts the pods. Not for secrets: a ConfigMap is plain text.
+extraFiles: {}
+  # manifest.json: |
+  #   {"example": {"writeTo": {"path": "/var/run/live/flags.json"}}}
+
 # The site's route (Gateway API HTTPRoute), in the release's namespace: every
 # path of `hostname` (and of `hostnames`) to the server, as one rule named
 # `site`. Off by default: a site behind an Ingress, or one whose route
