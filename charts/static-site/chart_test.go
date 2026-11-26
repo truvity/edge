@@ -326,3 +326,96 @@ func TestExtraFilesNeedAnExtraContainer(t *testing.T) {
 		t.Fatalf("refused for another reason:\n%s", out)
 	}
 }
+
+const flagsValues = `
+site:
+  artifact:
+    ref: registry.example.com/static/site
+registry:
+  auth: ecr
+serviceAccount:
+  name: static-site
+flags:
+  appconfig:
+    enabled: true
+    application: shop-web
+    environment: globex
+    profile: flags
+    region: eu-central-1
+`
+
+// The flags file needs nothing but flags.appconfig: the agent's manifest names
+// the one configuration and the path the server reads, the server lists that
+// file as live, and the agent runs as the server does, with no write but the
+// live volume.
+func TestFlagsFromAppConfigAreOneBlock(t *testing.T) {
+	out, err := render(t, flagsValues)
+	if err != nil {
+		t.Fatalf("render: %v\n%s", err, out)
+	}
+
+	var manifest string
+
+	var pod map[string]any
+
+	for _, d := range strings.Split(out, "\n---") {
+		var m map[string]any
+		if yaml.Unmarshal([]byte(d), &m) != nil {
+			continue
+		}
+
+		meta, _ := m["metadata"].(map[string]any)
+
+		switch {
+		case m["kind"] == "ConfigMap" && meta["name"] == "x-static-site-flags":
+			manifest, _ = m["data"].(map[string]any)["manifest.json"].(string)
+		case m["kind"] == "Deployment":
+			pod = m["spec"].(map[string]any)["template"].(map[string]any)["spec"].(map[string]any)
+		}
+	}
+
+	if want := `{"shop-web:globex:flags":{"writeTo":{"path":"/var/run/live/flags.json"}}}`; manifest != want {
+		t.Fatalf("the manifest is %q, want %q", manifest, want)
+	}
+
+	env := func(c map[string]any, name string) any {
+		for _, e := range c["env"].([]any) {
+			if e.(map[string]any)["name"] == name {
+				return e.(map[string]any)["value"]
+			}
+		}
+
+		return nil
+	}
+
+	seen := map[string]bool{}
+
+	for _, c := range pod["containers"].([]any) {
+		c := c.(map[string]any)
+		seen[c["name"].(string)] = true
+
+		switch c["name"] {
+		case "static-site":
+			if got := env(c, "STATIC_SITE_LIVE_FILES"); got != "flags.json" {
+				t.Fatalf("the server's live files are %v", got)
+			}
+		case "appconfig-agent":
+			if got := env(c, "PREFETCH_LIST"); got != "shop-web:globex:flags" {
+				t.Fatalf("the agent prefetches %v", got)
+			}
+
+			sc := c["securityContext"].(map[string]any)
+			if sc["readOnlyRootFilesystem"] != true || sc["runAsNonRoot"] != true || sc["allowPrivilegeEscalation"] != false {
+				t.Fatalf("the agent's securityContext is %v", sc)
+			}
+
+			if !strings.Contains(c["image"].(string), "@sha256:") {
+				t.Fatalf("the agent's image is not pinned by digest: %v", c["image"])
+			}
+		}
+	}
+
+	if !seen["static-site"] || !seen["appconfig-agent"] {
+		t.Fatalf("containers: %v", seen)
+	}
+}

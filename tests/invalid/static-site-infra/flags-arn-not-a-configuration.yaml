@@ -1,0 +1,10 @@
+registry:
+  auth: ecr
+  ack:
+    enabled: true
+    clusterName: example
+    repositoryArns:
+      - arn:aws:ecr:eu-central-1:123456789012:repository/example
+flags:
+  appconfig:
+    configurationArn: arn:aws:appconfig:eu-central-1:123456789012:application/abc1234

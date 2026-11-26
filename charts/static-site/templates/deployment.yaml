@@ -2,6 +2,7 @@
 {{- include "static-site.validateExternalSecret" . }}
 {{- include "static-site.validateRegistry" . }}
 {{- include "static-site.validateLive" . }}
+{{- include "static-site.validateFlags" . }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -25,6 +26,9 @@ spec:
         checksum/placeholders: {{ include "static-site.placeholders" . | sha256sum }}
         {{- if .Values.extraFiles }}
         checksum/extra-files: {{ toJson .Values.extraFiles | sha256sum }}
+        {{- end }}
+        {{- if include "static-site.flagsOn" . }}
+        checksum/flags: {{ include "static-site.flagsManifest" . | sha256sum }}
         {{- end }}
         {{- with .Values.podAnnotations }}
         {{- toYaml . | nindent 8 }}
@@ -130,11 +134,11 @@ spec:
             - name: STATIC_SITE_PLACEHOLDERS_STRICT
               value: "true"
             {{- end }}
-            {{- if .Values.live.enabled }}
+            {{- if include "static-site.liveOn" . }}
             - name: STATIC_SITE_LIVE_DIR
               value: /var/run/live
             - name: STATIC_SITE_LIVE_FILES
-              value: {{ join "," .Values.live.files | quote }}
+              value: {{ include "static-site.liveFiles" . | quote }}
             - name: STATIC_SITE_LIVE_INTERVAL
               value: {{ .Values.live.interval | quote }}
             - name: STATIC_SITE_LIVE_MAX_BYTES
@@ -180,7 +184,7 @@ spec:
           volumeMounts:
             - name: content
               mountPath: /var/run/site
-            {{- if .Values.live.enabled }}
+            {{- if include "static-site.liveOn" . }}
             - name: live
               mountPath: /var/run/live
               readOnly: true
@@ -200,6 +204,42 @@ spec:
               mountPath: /etc/registry-auth
               readOnly: true
             {{- end }}
+        {{- if include "static-site.flagsOn" . }}
+        # The writer of the flags file: the AWS AppConfig Agent polls one
+        # configuration and writes it to the live volume. It reads its
+        # manifest once, at start. Nothing calls its own HTTP server, which
+        # stays on the pod's loopback.
+        - name: appconfig-agent
+          image: {{ include "static-site.flagsAgentImage" . }}
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: SERVICE_REGION
+              value: {{ .Values.flags.appconfig.region | quote }}
+            - name: MANIFEST
+              value: file:/etc/appconfig-agent/manifest.json
+            - name: PREFETCH_LIST
+              value: {{ printf "%s:%s:%s" .Values.flags.appconfig.application .Values.flags.appconfig.environment .Values.flags.appconfig.profile | quote }}
+            - name: POLL_INTERVAL
+              value: {{ .Values.flags.appconfig.pollInterval | int64 | quote }}
+            - name: HTTP_HOST
+              value: localhost
+          securityContext:
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          {{- with .Values.flags.appconfig.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: live
+              mountPath: /var/run/live
+            - name: flags-manifest
+              mountPath: /etc/appconfig-agent
+              readOnly: true
+        {{- end }}
         {{- with .Values.extraContainers }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
@@ -208,7 +248,12 @@ spec:
           emptyDir:
             medium: Memory
             sizeLimit: {{ .Values.site.contentSizeLimit | quote }}
-        {{- if .Values.live.enabled }}
+        {{- if include "static-site.flagsOn" . }}
+        - name: flags-manifest
+          configMap:
+            name: {{ include "static-site.fullname" . }}-flags
+        {{- end }}
+        {{- if include "static-site.liveOn" . }}
         - name: live
           emptyDir:
             medium: Memory

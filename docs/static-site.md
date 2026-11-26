@@ -517,6 +517,52 @@ passes only when the list holds that wildcard.
 A live file is public like the rest of the site: list only names whose content
 may be read by anyone who can reach it.
 
+### Feature flags from AWS AppConfig
+
+The commonest live file is a flags file, and for AWS AppConfig the chart
+writes the whole arrangement itself:
+
+```yaml
+# static-site
+registry:
+  auth: ecr
+flags:
+  appconfig:
+    enabled: true
+    application: shop-web      # the names of the configuration
+    environment: globex
+    profile: flags
+    region: eu-central-1
+```
+
+```yaml
+# static-site-infra
+flags:
+  appconfig:
+    configurationArn: arn:aws:appconfig:eu-central-1:123456789012:application/abc1234/environment/def5678/configuration/ghi9012
+```
+
+The pod gets a second container, the AWS AppConfig Agent, which polls that one
+feature-flag configuration and writes it to the live volume as
+`flags.appconfig.file` (default `flags.json`); the server serves it at
+`/flags.json` under every rule of the table above. The role gets the agent's
+two reads, `appconfig:StartConfigurationSession` and
+`appconfig:GetLatestConfiguration`, on the one configuration the ARN names and
+on nothing else. `live` and `extraContainers` are not needed for it, and both
+still work beside it.
+
+| | |
+|---|---|
+| the file | the configuration as AppConfig returns it for a feature-flag profile: `{"<flag>": {"enabled": true, ...}, ...}` |
+| a change | is an AppConfig deployment: no release, no restart. It is served within `flags.appconfig.pollInterval` (default 15 seconds) plus `live.interval` |
+| before the first deployment | the agent writes nothing and the name answers 404. It then asks again every 60 seconds, not every `pollInterval` |
+| switching back at once | AppConfig refuses a new deployment to an environment while one is in progress, and its predefined `AppConfig.AllAtOnce` strategy stays in progress for a 10 minute bake. Deploy flags with a strategy of your own that has no bake time |
+| the agent | pinned by tag and digest in `images.appconfig-agent`; non-root, read-only root file system, no capabilities; its own HTTP server stays on the pod's loopback |
+| credentials | the pod's own, so `registry.auth` must be `ecr`. The ARN takes the ids of the application, the environment and the configuration profile, not their names, and no wildcard |
+
+The file is public like the rest of the site: only flags whose names and
+values anyone may read.
+
 ### Files for the writer
 
 A writer that reads a file at start (a configuration, a manifest of what to
@@ -618,7 +664,8 @@ site must put its sign-in in front of the site, and the server is then reachable
 only through that gateway. `route` renders the site's `HTTPRoute` (see The
 route). `live` and `extraContainers` add files a second
 container of the pod keeps current, and `extraFiles` gives that container
-files of its own (see Live files). `values.schema.json` is strict at the top level, and
+files of its own; `flags.appconfig` is that arrangement ready-made for a
+flags file from AWS AppConfig (see Live files). `values.schema.json` is strict at the top level, and
 every refusal has a fixture under `tests/invalid/static-site/`.
 
 ## Release

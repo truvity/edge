@@ -47,6 +47,16 @@ registry:
       # - appconfig:StartConfigurationSession
       # - appconfig:GetLatestConfiguration
 
+# The flags file of the static-site chart (flags.appconfig there): the role
+# may read ONE AWS AppConfig configuration, the two calls of the AppConfig
+# Agent and nothing else. The ARN names the configuration by the ids of its
+# application, environment and configuration profile:
+#   arn:aws:appconfig:<region>:<account>:application/<id>/environment/<id>/configuration/<id>
+# Empty: no statement. Needs registry.ack.enabled, which makes the role.
+flags:
+  appconfig:
+    configurationArn: ""
+
 # The ServiceAccount the association binds, rendered after it. create=false
 # leaves the account to someone else (the association still names it).
 serviceAccount:

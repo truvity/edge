@@ -1,0 +1,28 @@
+# The flags file beside another live file with a writer of its own: one live
+# volume, both names served, two extra containers in the pod.
+site:
+  artifact:
+    ref: registry.example.com/static/www
+    digest: sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+registry:
+  auth: ecr
+serviceAccount:
+  name: static-site
+flags:
+  appconfig:
+    enabled: true
+    application: shop-web
+    environment: globex
+    profile: flags
+    region: eu-central-1
+    file: features.json
+    pollInterval: 30
+live:
+  enabled: true
+  files: [banner.json]
+extraContainers:
+  - name: banner-writer
+    image: registry.example.com/banner-writer:1.0.0@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+    volumeMounts:
+      - name: live
+        mountPath: /var/run/live

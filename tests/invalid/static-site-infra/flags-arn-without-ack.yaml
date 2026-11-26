@@ -1,0 +1,3 @@
+flags:
+  appconfig:
+    configurationArn: arn:aws:appconfig:eu-central-1:123456789012:application/abc1234/environment/def5678/configuration/ghi9012

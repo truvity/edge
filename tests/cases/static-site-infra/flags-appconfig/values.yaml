@@ -1,0 +1,14 @@
+# The role may read one AWS AppConfig configuration, for the flags file of
+# the static-site chart: the agent's two calls, on that one resource.
+registry:
+  auth: ecr
+  ack:
+    enabled: true
+    clusterName: example
+    repositoryArns:
+      - arn:aws:ecr:eu-central-1:123456789012:repository/example
+flags:
+  appconfig:
+    configurationArn: arn:aws:appconfig:eu-central-1:123456789012:application/abc1234/environment/def5678/configuration/ghi9012
+serviceAccount:
+  name: static-site

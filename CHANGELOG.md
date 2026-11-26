@@ -5,6 +5,12 @@ heading here is a patch cut automatically for dependency bumps alone; its
 GitHub Release lists them. The chart and the Go module are released
 together at every version.
 
+## v4.18.0
+
+### Added
+
+- **`static-site` and `static-site-infra`: `flags.appconfig`, a flags file from AWS AppConfig.** In `static-site`, `flags.appconfig.enabled` with the names of one feature-flag configuration (`application`, `environment`, `profile`) and its `region` adds the AWS AppConfig Agent to the pod as a second container. It polls the configuration every `pollInterval` (default 15 seconds) and writes it to the live volume as `file` (default `flags.json`), which the server serves as a live file. The chart writes the agent's manifest, pins its image by tag and digest (`images.appconfig-agent`) and runs it non-root with a read-only root file system; `live` and `extraContainers` are not needed and still work beside it. In `static-site-infra`, `flags.appconfig.configurationArn` puts the agent's two reads (`appconfig:StartConfigurationSession`, `appconfig:GetLatestConfiguration`) on the role, on that one configuration: the ARN takes ids and no wildcard. Needs `registry.auth: ecr`. Off by default: every existing render is unchanged. It replaces the hand-written arrangement of v4.17.0 (`live`, `extraContainers`, `extraFiles` and `registry.ack.extraStatements` together), which keeps working. See [docs/static-site.md](docs/static-site.md#feature-flags-from-aws-appconfig).
+
 ## v4.17.0
 
 ### Added

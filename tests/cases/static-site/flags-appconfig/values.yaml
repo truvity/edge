@@ -1,0 +1,18 @@
+# Feature flags from AWS AppConfig: the AppConfig Agent is a second container
+# that writes the one configuration to the live volume, and the server serves
+# it at /flags.json. No extraContainers, no live block: flags.appconfig alone.
+site:
+  artifact:
+    ref: registry.example.com/static/www
+    digest: sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+registry:
+  auth: ecr
+serviceAccount:
+  name: static-site
+flags:
+  appconfig:
+    enabled: true
+    application: shop-web
+    environment: globex
+    profile: flags
+    region: eu-central-1
