@@ -69,5 +69,17 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- fail (printf "the IAM name %q is longer than 64 characters: set registry.ack.rolePrefix" (include "static-site-infra.ackName" $)) -}}
 {{- end -}}
 {{- end -}}
+{{- /* Outside `enabled`: a list that limits the statements must never be
+       skipped because another key is off. */ -}}
+{{- if .allowedExtraActions -}}
+{{- $allowed := .allowedExtraActions -}}
+{{- range $i, $statement := .extraStatements -}}
+{{- range $statement.Action -}}
+{{- if not (has . $allowed) -}}
+{{- fail (printf "registry.ack.extraStatements[%d]: the action %s is not in registry.ack.allowedExtraActions (%s)" $i . (join ", " $allowed)) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
 {{- end -}}
 {{- end -}}

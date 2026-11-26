@@ -73,6 +73,16 @@
               "type": "string",
               "pattern": "^(arn:aws[a-z-]*:iam::[0-9]{12}:policy/.+)?$"
             },
+            "allowedExtraActions": {
+              "type": "array",
+              "description": "the actions an extra statement may name, matched as written; empty admits any action",
+              "maxItems": 32,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "pattern": "^[a-z0-9-]+:[A-Za-z0-9]+\\*?$"
+              }
+            },
             "extraStatements": {
               "type": "array",
               "description": "more statements on the role's policy, after the ECR ones: what a second container of the pod calls (extraContainers of the static-site chart). Allow only, and never on every resource",
