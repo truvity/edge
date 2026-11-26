@@ -1,0 +1,31 @@
+# A file for an extra container: the writer of the live files reads its
+# configuration from the volume `extra-files`, which the chart renders as a
+# ConfigMap. The server does not mount it.
+site:
+  artifact:
+    ref: registry.example.com/static/www
+    digest: sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+live:
+  enabled: true
+  files:
+    - flags.json
+extraFiles:
+  manifest.json: |
+    {"example": {"writeTo": {"path": "/var/run/live/flags.json"}}}
+extraContainers:
+  - name: flags-writer
+    image: registry.example.com/flags-writer:1.0.0@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+    env:
+      - name: MANIFEST
+        value: file:/etc/extra/manifest.json
+    securityContext:
+      allowPrivilegeEscalation: false
+      readOnlyRootFilesystem: true
+      capabilities:
+        drop: ["ALL"]
+    volumeMounts:
+      - name: live
+        mountPath: /var/run/live
+      - name: extra-files
+        mountPath: /etc/extra
+        readOnly: true

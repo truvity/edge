@@ -513,6 +513,37 @@ role what it needs with `registry.ack.extraStatements` of `static-site-infra`
 A live file is public like the rest of the site: list only names whose content
 may be read by anyone who can reach it.
 
+### Files for the writer
+
+A writer that reads a file at start (a configuration, a manifest of what to
+write where) gets it from `extraFiles`, a map of file name to content:
+
+```yaml
+extraFiles:
+  manifest.json: |
+    {"example": {"writeTo": {"path": "/var/run/live/flags.json"}}}
+extraContainers:
+  - name: flags-writer
+    image: registry.example.com/flags-writer:1.0.0
+    env:
+      - name: MANIFEST
+        value: file:/etc/extra/manifest.json
+    volumeMounts:
+      - name: live
+        mountPath: /var/run/live
+      - name: extra-files
+        mountPath: /etc/extra
+        readOnly: true
+```
+
+The chart renders the files as one ConfigMap, `<fullname>-extra-files`, and
+adds the volume `extra-files` to the pod. A container that wants them mounts
+that volume; the server does not, and never serves them. At most 16 files of
+64 KiB each, with plain file names. A change of a file restarts the pods (a
+checksum on the pod), since a container usually reads such a file once.
+`extraFiles` without `extraContainers` is refused. A ConfigMap is plain text:
+no secrets here.
+
 ## The route
 
 `route.enabled` renders the site's Gateway API `HTTPRoute` in the release's
@@ -582,7 +613,8 @@ egress to DNS and HTTPS. `cache.private: true` makes every response `private, no
 site must put its sign-in in front of the site, and the server is then reachable
 only through that gateway. `route` renders the site's `HTTPRoute` (see The
 route). `live` and `extraContainers` add files a second
-container of the pod keeps current (see Live files). `values.schema.json` is strict at the top level, and
+container of the pod keeps current, and `extraFiles` gives that container
+files of its own (see Live files). `values.schema.json` is strict at the top level, and
 every refusal has a fixture under `tests/invalid/static-site/`.
 
 ## Release

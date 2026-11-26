@@ -237,3 +237,92 @@ func TestRouteNeedsAHostnameAndAParent(t *testing.T) {
 		}
 	}
 }
+
+const extraFilesValues = `
+site:
+  artifact:
+    ref: registry.example.com/static/site
+extraFiles:
+  manifest.json: '{"a": 1}'
+%s
+`
+
+const extraFilesWriter = `
+extraContainers:
+  - name: writer
+    image: registry.example.com/writer:1.0.0
+    volumeMounts:
+      - name: extra-files
+        mountPath: /etc/extra
+        readOnly: true
+`
+
+// The files reach the writer and nobody else: one ConfigMap, a volume of the
+// pod, and no mount of it in the server, which serves what it mounts.
+func TestExtraFilesAreAVolumeTheServerDoesNotMount(t *testing.T) {
+	out, err := render(t, fmt.Sprintf(extraFilesValues, extraFilesWriter))
+	if err != nil {
+		t.Fatalf("render: %v\n%s", err, out)
+	}
+
+	var data map[string]any
+
+	var pod map[string]any
+
+	for _, d := range strings.Split(out, "\n---") {
+		var m map[string]any
+		if yaml.Unmarshal([]byte(d), &m) != nil {
+			continue
+		}
+
+		meta, _ := m["metadata"].(map[string]any)
+
+		switch {
+		case m["kind"] == "ConfigMap" && meta["name"] == "x-static-site-extra-files":
+			data, _ = m["data"].(map[string]any)
+		case m["kind"] == "Deployment":
+			pod = m["spec"].(map[string]any)["template"].(map[string]any)["spec"].(map[string]any)
+		}
+	}
+
+	if data["manifest.json"] != `{"a": 1}` {
+		t.Fatalf("the ConfigMap does not hold the file as given: %v", data)
+	}
+
+	var volume bool
+
+	for _, v := range pod["volumes"].([]any) {
+		if v.(map[string]any)["name"] == "extra-files" {
+			volume = true
+		}
+	}
+
+	if !volume {
+		t.Fatal("the pod has no volume extra-files")
+	}
+
+	for _, c := range pod["containers"].([]any) {
+		c := c.(map[string]any)
+		if c["name"] != "static-site" {
+			continue
+		}
+
+		for _, m := range c["volumeMounts"].([]any) {
+			if m.(map[string]any)["name"] == "extra-files" {
+				t.Fatal("the server mounts extra-files")
+			}
+		}
+	}
+}
+
+// Nobody reads the files without an extra container, so the render is refused.
+func TestExtraFilesNeedAnExtraContainer(t *testing.T) {
+	out, err := render(t, fmt.Sprintf(extraFilesValues, ""))
+	if err == nil {
+		t.Fatalf("rendered without an extra container:\n%s", out)
+	}
+
+	if !strings.Contains(out, "extraFiles needs extraContainers") {
+		t.Fatalf("refused for another reason:\n%s", out)
+	}
+}
